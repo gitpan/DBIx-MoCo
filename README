@@ -1,0 +1,127 @@
+NAME
+    DBIx::MoCo - Light & Fast Model Component
+
+SYNOPSIS
+      # First, set up your db.
+      package Blog::DataBase;
+      use base qw(DBIx::MoCo::DataBase);
+
+      __PACKAGE__->dsn('dbi:mysql:dbname=blog');
+      __PACKAGE__->username('test');
+      __PACKAGE__->password('test');
+
+      1;
+
+      # Second, create a base class for all models.
+      package Blog::TableObject;
+      use base qw 'DBIx::MoCo'; # Inherit DBIx::MoCo
+
+      __PACKAGE__->db_object('Blog::DataBase');
+
+      1;
+
+      # Third, create your models.
+      package Blog::User;
+      use base qw 'Blog::TableObject';
+
+      __PACKAGE__->table('user');
+      __PACKAGE__->primary_keys(['user_id']);
+      __PACKAGE__->has_many(
+          entries => 'Blog::Entry',
+          { key => 'user_id' }
+      );
+      __PACKAGE__->has_many(
+          bookmarks => 'Blog::Bookmark',
+          { key => 'user_id' }
+      );
+
+      1;
+
+      package Blog::Entry;
+      use base qw 'Blog::TableObject';
+
+      __PACKAGE__->table('entry');
+      __PACKAGE__->primary_keys(['entry_id']);
+      __PACKAGE__->has_a(
+          user => 'Blog::User',
+          { key => 'user_id' }
+      );
+      __PACKAGE__->has_many(
+          bookmarks => 'Blog::Bookmark',
+          { key => 'entry_id' }
+      );
+
+      1;
+
+      package Blog::Bookmark;
+      use base qw 'Blog::TableObject';
+
+      __PACKAGE__->table('bookmark');
+      __PACKAGE__->primary_keys(['user_id','entry_id']);
+      __PACKAGE__->has_a(
+          user => 'Blog::User',
+          { key => 'user_id' }
+      );
+      __PACKAGE__->has_a(
+          entry => 'Blog::Entry',
+          { key => 'entry_id' }
+      );
+
+      1;
+
+      # Now, You can use some methods same as in Class::DBI.
+      # And, all objects are stored in cache automatically.
+      my $user = Blog::User->retrieve(user_id => 123);
+      print $user->name;
+      $user->name('jkontan'); # update db immediately
+      print $user->name; # jkontan
+
+      my $user2 = Blog::User->retrieve(user_id => 123);
+      # $user is same as $user2
+
+      # You can easily get has_many objects array.
+      my $entries = $user->entries;
+      my $entries2 = $user->entries;
+      # $entries is same reference as $entries2
+      my $entry = $entries->first; # isa Blog::Entry
+      print $entry->title; # you can use methods in Entry class.
+
+      Blog::Entry->create(
+        user_id => 123,
+        title => 'new entry!',
+      );
+      # $user->entries will be flushed automatically.
+      my $entries3 = $user->entries;
+      # $entries3 isnt $entries
+
+      print ($entries->last eq $entries2->last); # 1
+      print ($entries->last eq $entries3->last); # 1
+      # same instance
+
+      # You can delay update/create query to database using session.
+      DBIx::MoCo->start_session;
+      $user->name('jkondo'); # not saved now. changed in cache.
+      print $user->name; # 'jkondo'
+      $user->save; # update db
+      print Blog::User->retrieve(123)->name; # 'jkondo'
+
+      # Or, update queries will be thrown automatically after ending session.
+      $user->name('jkontan');
+      DBIx::MoCo->end_session;
+      print Blog::User->retrieve(123)->name; # 'jkontan'
+
+DESCRIPTION
+    Light & Fast Model Component
+
+SEE ALSO
+    Class::DBI, Cache, SQL::Abstract
+
+AUTHOR
+    Junya Kondo, <jkondo@hatena.com>, Naoya Ito, <naoya@hatena.ne.jp>
+
+COPYRIGHT AND LICENSE
+    Copyright (C) Hatena Inc. All Rights Reserved.
+
+    This library is free software; you may redistribute it and/or modify it
+    under the same terms as Perl itself.
+

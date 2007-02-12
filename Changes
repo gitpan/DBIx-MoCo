@@ -1,0 +1,29 @@
+Revision history for Perl extension DBIx::MoCo.
+
+0.06  Mon Feb 12 2007
+        - changed name from MoCo to DBIx::MoCo. (sorry to change so many times ;)
+	- changed DataBase->dbh using DBI->connect_cached.
+	- added cache_connection attribute in DataBase.
+
+0.05  Sat Feb 3 2007
+        - fixed bug that null cache with other key isn't flushed when a new record is inserted
+        - Added DBIx::MoCo->keys and changed flush_cache to flush all possible oids.
+        - fixed bug in create to set primary key
+	- changed croak in object_id to warning for new created object
+
+0.04  Wed Jan 31 2007
+        - changed name from Class::DBIx::MoCo to DBIx::MoCo
+	- added session & delay saving feature in DBIx::MoCo.
+	- changed AUTOLOAD behavior when undefined attr is called
+	- added retrieve_or_create method using prmary keys.
+
+0.03  Tue Jan 30 2007
+	- added param method to update db
+	- changed name from Class::TableObject to Clsss::DBIx::MoCo
+	- changed Class::DBIx::MoCo::Cache API same as Cache.pm
+
+0.02  Tue Jan 30 2007
+	- added param method (not update db yet)
+
+0.01  Mon Jan 29 2007
+	- initial version
