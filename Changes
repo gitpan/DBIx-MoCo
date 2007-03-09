@@ -1,5 +1,19 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.07  Fri Mar 9 2007
+	- Added DBIx::MoCo::Schema for schema definition
+	- Added count method to DBIx::MoCo
+	- Removed keys method and added unique_keys method to MoCo
+	- Changed primary_keys, unique_keys to get info automatically
+        - Added cache_status method to DBIx::MoCo
+	- Added DBIx::MoCo::Column and URI plugin for inflating columns
+	- Added DBIx::MoCo::Join for joined classes
+	- Added DBIx::MoCo::Readonly for read only classes.
+	- Fixed problem new session will start when save_changed is called.
+	- Added retrieve_by_a_or_b handler into DBIx::MoCo
+	- Added descriptions to MoCo's pod.
+	- Added retrieve_keys to MoCo
+
 0.06  Mon Feb 12 2007
         - changed name from MoCo to DBIx::MoCo. (sorry to change so many times ;)
 	- changed DataBase->dbh using DBI->connect_cached.

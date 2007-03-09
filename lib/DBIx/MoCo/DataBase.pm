@@ -154,6 +154,53 @@ sub execute {
     return !$sth->err;
 }
 
+sub vendor {
+    my $class = shift;
+    $class->dbh->get_info(17); # SQL_DBMS_NAME
+}
+
+sub primary_keys {
+    my $class = shift;
+    my $table = shift or return;
+    if ($class->vendor eq 'MySQL') {
+        my $sth = $class->dbh->column_info(undef,undef,$table,'%');
+        return [
+            map {$_->{COLUMN_NAME}}
+            grep {$_->{mysql_is_pri_key}}
+            @{$sth->fetchall_arrayref({})}
+        ];
+    } else {
+        return [$class->dbh->primary_key(undef,undef,$table)];
+    }
+}
+
+sub unique_keys {
+    my $class = shift;
+    my $table = shift or return;
+    if ($class->vendor eq 'MySQL') {
+        my $sql = "show index from $table";
+        my $data;
+        $class->execute($sql,\$data);
+        return [
+            map {$_->{Column_name}}
+            grep {!$_->{Non_unique}}
+            @$data
+        ];
+    } else {
+        return $class->primary_keys($table);
+    }
+}
+
+sub columns {
+    my $class = shift;
+    my $table = shift or return;
+    my $sth = $class->dbh->column_info(undef,undef,$table,'%') or return;
+    return [
+        map {$_->{COLUMN_NAME}}
+        @{$sth->fetchall_arrayref({})}
+    ];
+}
+
 1;
 
 =head1 NAME

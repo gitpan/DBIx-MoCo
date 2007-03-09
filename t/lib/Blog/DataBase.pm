@@ -12,7 +12,7 @@ __PACKAGE__->dsn("dbi:SQLite:dbname=$DB");
 __PACKAGE__->execute(<<EOF);
 CREATE TABLE user (
   user_id INTEGER PRIMARY KEY,
-  name varchar(255)
+  name varchar(255) UNIQUE
 )
 EOF
 

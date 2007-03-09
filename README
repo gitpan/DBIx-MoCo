@@ -13,8 +13,9 @@ SYNOPSIS
       1;
 
       # Second, create a base class for all models.
-      package Blog::TableObject;
+      package Blog::MoCo;
       use base qw 'DBIx::MoCo'; # Inherit DBIx::MoCo
+      use Blog::DataBase;
 
       __PACKAGE__->db_object('Blog::DataBase');
 
@@ -22,10 +23,9 @@ SYNOPSIS
 
       # Third, create your models.
       package Blog::User;
-      use base qw 'Blog::TableObject';
+      use base qw 'Blog::MoCo';
 
       __PACKAGE__->table('user');
-      __PACKAGE__->primary_keys(['user_id']);
       __PACKAGE__->has_many(
           entries => 'Blog::Entry',
           { key => 'user_id' }
@@ -38,10 +38,9 @@ SYNOPSIS
       1;
 
       package Blog::Entry;
-      use base qw 'Blog::TableObject';
+      use base qw 'Blog::MoCo';
 
       __PACKAGE__->table('entry');
-      __PACKAGE__->primary_keys(['entry_id']);
       __PACKAGE__->has_a(
           user => 'Blog::User',
           { key => 'user_id' }
@@ -54,10 +53,9 @@ SYNOPSIS
       1;
 
       package Blog::Bookmark;
-      use base qw 'Blog::TableObject';
+      use base qw 'Blog::MoCo';
 
       __PACKAGE__->table('bookmark');
-      __PACKAGE__->primary_keys(['user_id','entry_id']);
       __PACKAGE__->has_a(
           user => 'Blog::User',
           { key => 'user_id' }
@@ -113,11 +111,151 @@ SYNOPSIS
 DESCRIPTION
     Light & Fast Model Component
 
+CLASS METHODS
+    Here are common class methods of DBIx::MoCo.
+
+    has_a
+        Defines has_a relationship between 2 models.
+
+    has_many
+        Defines has_many relationship between 2 models.
+
+    retrieve_keys
+        Defines keys for retrieving by retrieve_all etc. If there aren't any
+        unique keys in your table, please specify these keys.
+
+          package Blog::Bookmark;
+
+          __PACKAGE__->retrieve_keys(['user_id', 'entry_id']);
+          # When user can add multiple bookmarks onto same entry.
+
+    start_session
+    end_session
+    is_in_session
+    cache_status
+        Returns cache status hash reference. cache_status provides
+        retrieve_count, retrieve_cache_count, retrieved_oids
+        retrieve_all_count, has_many_count, has_many_cache_count,
+
+    cache
+        Set or get cache.
+
+    flush_cache
+        Remove given cache value.
+
+    schema
+        Returns DBIx::MoCo::Schema object reference related with your model
+        class.
+
+    primary_keys
+    unique_keys
+    columns
+    retrieve
+    retrieve_or_create
+    retrieve_all
+    retrieve_all_id_hash
+    create
+    delete_all
+    count
+    search
+    retrieve_by_column(_and_column2)
+    retrieve_by_column(_and_column2)_or_create
+    retrieve_by_column_or_column2
+    column_as_something
+        Inflate column value by using DBIx::MoCo::Column::* plugins. If you
+        set up your plugin like this,
+
+          package DBIx::MoCo::Column::MyColumn;
+
+          sub MyColumn {
+            my $self = shift;
+            return "My Column $$self";
+          }
+
+          1;
+
+        Then, you can use column_as_MyColumn method
+
+          my $o = MyObject->retrieve(..);
+          print $o->name; # "jkondo"
+          print $o->name_as_MyColumn; # "My Column jkondo";
+
+        You can also inflate your column value by other classes.
+
+    has_a, has_many auto generated methods
+        If you define has_a, has_many relationships,
+
+          package Blog::Entry;
+          use base qw 'Blog::MoCo';
+
+          __PACKAGE__->table('entry');
+          __PACKAGE__->has_a(
+              user => 'Blog::User',
+              { key => 'user_id' }
+          );
+          __PACKAGE__->has_many(
+              bookmarks => 'Blog::Bookmark',
+              { key => 'entry_id' }
+          );
+
+        You can use those keys as methods.
+
+          my $e = Blog::Entry->retrieve(..);
+          print $e->user; # isa Blog::User
+          print $e->bookmarks; # isa ARRAY of Blog::Bookmark
+
+CLASS OR INSTANCE METHODS
+    Here are common class or instance methods of DBIx::MoCo.
+
+    object_id
+    delete
+
+INSTANCE METHODS
+    Here are common instance methods of DBIx::MoCo.
+
+    flush
+        Delete attribute from given attr. name.
+
+    param
+        Set or get attribute from given attr. name.
+
+    set Set attribute which is not related with DB schema or set temporary.
+
+    has_primary_keys
+    save
+        Saves changed columns in session.
+
+    object_ids
+        Returns all possible object-ids.
+
+FORM VALIDATION
+    You can validate user parameters using moco's schema. For example you
+    can define your validation profile using param like this,
+
+      package Blog::User;
+
+      __PACKAGE__->schema->param([
+        name => ['NOT_BLANK', 'ASCII', ['DBIC_UNIQUE', 'Blog::User', 'name']],
+        mail => ['NOT_BLANK', 'EMAIL_LOOSE'],
+      ]);
+
+    And then,
+
+      # In your scripts
+      sub validate {
+        my $self = shift;
+        my $q = $self->query;
+        my $prof = Blog::User->schema->param('validation');
+        my $result = FormValidator::Simple->check($q => $prof);
+        # handle errors ...
+      }
+
 SEE ALSO
-    Class::DBI, Cache, SQL::Abstract
+    SQL::Abstract, Class::DBI, Cache,
 
 AUTHOR
-    Junya Kondo, <jkondo@hatena.com>, Naoya Ito, <naoya@hatena.ne.jp>
+    Junya Kondo, <http://use.perl.org/~jkondo/>, Naoya Ito,
+    <naoya@hatena.ne.jp>
 
 COPYRIGHT AND LICENSE
     Copyright (C) Hatena Inc. All Rights Reserved.

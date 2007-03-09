@@ -4,10 +4,13 @@ use warnings;
 use base qw (Class::Data::Inheritable);
 use DBIx::MoCo::List;
 use DBIx::MoCo::Cache;
+use DBIx::MoCo::Schema;
+use DBIx::MoCo::Column;
 use Carp;
 use Class::Trigger;
+use UNIVERSAL::require;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 our $AUTOLOAD;
 our $cache_status = {
     retrieve_count => 0,
@@ -21,17 +24,18 @@ our $cache_status = {
 #  retrieve_count, retrieve_cache_count, retrieved_oids
 #  retrieve_all_count, has_many_count, has_many_cache_count,
 
-__PACKAGE__->mk_classdata($_) for qw(cache_object db_object);
-__PACKAGE__->mk_classdata($_) for qw(table primary_keys keys);
+__PACKAGE__->mk_classdata($_) for qw(cache_object db_object table
+                                     retrieve_keys _schema);
+
 __PACKAGE__->add_trigger(after_create => \&_after_create);
 __PACKAGE__->add_trigger(after_delete => \&_after_delete);
 __PACKAGE__->add_trigger(after_update => \&_after_update);
 
-__PACKAGE__->keys([]);
 __PACKAGE__->cache_object('DBIx::MoCo::Cache');
 
 my ($cache,$db,$session);
 
+# Session
 sub start_session {
     my $class = shift;
     $class->end_session if $class->is_in_session;
@@ -48,10 +52,36 @@ sub session { $session }
 sub end_session {
     my $class = shift;
     $session or return;
-    $_->save for @{$session->{changed_objects}};
+    $class->save_changed;
     $cache_status->{retrieved_oids} = [];
     $session = undef;
 }
+
+sub save_changed {
+    my $class = shift;
+    $class->is_in_session or return;
+    $_->save for @{$class->session->{changed_objects}};
+}
+
+sub _after_create {
+    my ($class, $self) = @_;
+    $self or return;
+    $class->cache($_, $self) for @{$self->object_ids};
+    $class->_flush_belongs_to($self);
+}
+
+sub _after_delete {
+    my ($class, $self) = @_;
+    $self or return;
+    #warn 'delete '.$self->object_id;
+    $class->flush_cache($self);
+    $class->_flush_belongs_to($self);
+}
+
+sub _after_update {}
+
+# Cache
+sub cache_status { $cache_status };
 
 sub _flush_belongs_to {
     my ($class, $self) = @_;
@@ -77,23 +107,23 @@ sub _flush_belongs_to {
     }
 }
 
-sub _after_create {
-    my ($class, $self) = @_;
-    $self or return;
-    $class->cache($_, $self) for @{$self->object_ids};
-    $class->_flush_belongs_to($self);
+sub cache {
+    my $class = shift;
+    $class = ref($class) if ref($class);
+    my ($k,$v) = @_;
+    $cache ||= $class->cache_object->new;
+    $cache->set($k => $v) if defined $v;
+    return $cache->get($k);
 }
 
-sub _after_delete {
-    my ($class, $self) = @_;
-    $self or return;
-    #warn 'delete '.$self->object_id;
-    $class->flush_cache($self);
-    $class->_flush_belongs_to($self);
+sub flush_cache {
+    my $class = shift;
+    my $o = shift or return;
+    #warn "flush cache $o";
+    $cache->remove($_) for @{$o->object_ids};
 }
 
-sub _after_update {}
-
+# Relations
 sub _relationship {
     my $class = shift;
     my ($reltype, $attr, $model, $option) = @_;
@@ -112,6 +142,31 @@ sub _relationship {
 sub has_a { shift->_relationship('has_a', @_) }
 sub has_many { shift->_relationship('has_many', @_) }
 
+# schema
+sub schema {
+    my $class = shift;
+    unless ($class->_schema) {
+        $class->_schema(DBIx::MoCo::Schema->new($class));
+    }
+    return $class->_schema;
+}
+
+sub primary_keys {
+    my $class = shift;
+    $class->schema->primary_keys;
+}
+
+sub unique_keys {
+    my $class = shift;
+    $class->schema->primary_keys;
+}
+
+sub columns {
+    my $class = shift;
+    $class->schema->columns;
+}
+
+# oid, db, create, retrieve..
 sub object_id {
     my $self = shift;
     my $class = ref($self) || $self;
@@ -120,7 +175,7 @@ sub object_id {
     if ($self && $self->{object_id}) {
         return $self->{object_id};
     } elsif ($self) {
-        for (sort @{$class->primary_keys}) {
+        for (sort @{$class->retrieve_keys || $class->primary_keys}) {
             $self->{$_} or warn "$_ is undefined for $self" and return;
             $key .= "-$_-" . $self->{$_};
         }
@@ -138,25 +193,9 @@ sub object_id {
     return $key;
 }
 
-sub cache {
-    my $class = shift;
-    $class = ref($class) if ref($class);
-    my ($k,$v) = @_;
-    $cache ||= $class->cache_object->new;
-    $cache->set($k => $v) if defined $v;
-    return $cache->get($k);
-}
-
 sub db {
     my $class = shift;
     $class->db_object;
-}
-
-sub flush_cache {
-    my $class = shift;
-    my $o = shift or return;
-    #warn "flush cache $o";
-    $cache->remove($_) for @{$o->object_ids};
 }
 
 sub retrieve {
@@ -212,7 +251,8 @@ sub retrieve_all_id_hash {
     my $class = shift;
     my %args = @_;
     ref $args{where} eq 'HASH' or die 'please specify where in hash';
-    my $res = $class->db->select($class->table,$class->primary_keys,
+    my $res = $class->db->select($class->table,
+                                 $class->retrieve_keys || $class->primary_keys,
                                  $args{where},$args{order},\%args);
     return $res;
 }
@@ -267,6 +307,17 @@ sub delete_all {
     return 1;
 }
 
+sub count {
+    my $class = shift;
+    my $args;
+    if (ref($_[0]) eq 'HASH') { # for FormValidator::Simple::Plugin::DBIC::UNIQUE
+        $args = shift;
+    } else {
+        %$args = @_;
+    }
+    $class->db->select($class->table,'count(*) as count',$args)->[0]->{count};
+}
+
 sub search {
     my $class = shift;
     my %args = @_;
@@ -277,6 +328,7 @@ sub search {
         DBIx::MoCo::List->new($res);
 }
 
+# new
 sub new {
     my $class = shift;
     my %args = @_;
@@ -295,9 +347,11 @@ sub AUTOLOAD {
     no strict 'refs';
     if ($method =~ /^retrieve_by_(.+?)(_or_create)?$/o) {
         my ($by, $create) = ($1,$2);
-        my @keys = split('_and_', $by);
-        *$AUTOLOAD = $create ? $class->_retrieve_by_or_create_handler(@keys) :
-            $class->_retrieve_by_handler(@keys);
+        *$AUTOLOAD = $create ? $class->_retrieve_by_or_create_handler($by) :
+            $class->_retrieve_by_handler($by);
+    } elsif ($method =~ /^(\w+)_as_(\w+)$/) {
+        my ($col,$as) = ($1,$2);
+        *$AUTOLOAD = $class->_column_as_handler($col,$as);
     } elsif ($class->has_a->{$method}) {
         *$AUTOLOAD = $class->_has_a_handler($method);
     } elsif ($class->has_many->{$method}) {
@@ -307,6 +361,25 @@ sub AUTOLOAD {
         *$AUTOLOAD = sub { shift->param($method, @_) };
     }
     goto &$AUTOLOAD;
+}
+
+sub _column_as_handler {
+    my $class = shift;
+    my ($col,$as) = @_;
+    unless (DBIx::MoCo::Column->can($as)) {
+        my $plugin = "DBIx::MoCo::Column::$as";
+        $plugin->require;
+        croak "Couldn't load column plugin $plugin: $@"  if $@;
+        {
+            no strict 'refs';
+            push @{"DBIx::MoCo::Column::ISA"}, $plugin;
+        }
+    }
+    return sub {
+        my $self = shift;
+        my $v = $self->$col or return;
+        $self->column($col)->$as();
+    }
 }
 
 sub _has_a_handler {
@@ -374,18 +447,32 @@ sub _has_many_handler {
 
 sub _retrieve_by_handler {
     my $class = shift;
-    my @keys = @_;
-    return sub {
-        my $self = shift;
-        my %args;
-        @args{@keys} = @_;
-        $self->retrieve(%args);
-    };
+    my $by = shift or return;
+    if ($by =~ /.+_or_.+/) {
+        my @keys = split('_or_', $by);
+        return sub {
+            my $self = shift;
+            my $v = shift;
+            for (@keys) {
+                my $o = $self->retrieve($_ => $v);
+                return $o if $o;
+            }
+        };
+    } else {
+        my @keys = split('_and_', $by);
+        return sub {
+            my $self = shift;
+            my %args;
+            @args{@keys} = @_;
+            $self->retrieve(%args);
+        };
+    }
 }
 
 sub _retrieve_by_or_create_handler {
     my $class = shift;
-    my @keys = @_;
+    my $by = shift or return;
+    my @keys = split('_and_', $by);
     return sub {
         my $self = shift;
         my %args;
@@ -396,7 +483,7 @@ sub _retrieve_by_or_create_handler {
 
 sub DESTROY {
     my $class = shift;
-    $class->end_session;
+    $class->save_changed;
 }
 
 # Instance methods
@@ -427,6 +514,13 @@ sub param {
     }
     $class->call_trigger('after_update', $self);
     return 1;
+}
+
+sub column {
+    my $self = shift;
+    my $col = shift or return;
+    my $v = $self->{$col} or return;
+    return DBIx::MoCo::Column->new($v);
 }
 
 sub set {
@@ -471,12 +565,13 @@ sub save {
 sub object_ids { # returns all possible oids
     my $self = shift;
     my $class = ref $self or return;
-    my @oids = ($self->object_id);
-    for my $key (@{$class->keys}) {
+    my $oids = {$self->object_id => 1};
+    for my $key (@{$class->unique_keys}) {
         next unless $self->{$key};
-        push @oids, $class->object_id($key => $self->{$key});
+        my $oid = $class->object_id($key => $self->{$key}) or next;
+        $oids->{$oid}++;
     }
-    return \@oids;
+    return [sort keys %$oids];
 }
 
 1;
@@ -500,8 +595,9 @@ DBIx::MoCo - Light & Fast Model Component
   1;
 
   # Second, create a base class for all models.
-  package Blog::TableObject;
+  package Blog::MoCo;
   use base qw 'DBIx::MoCo'; # Inherit DBIx::MoCo
+  use Blog::DataBase;
 
   __PACKAGE__->db_object('Blog::DataBase');
 
@@ -509,10 +605,9 @@ DBIx::MoCo - Light & Fast Model Component
 
   # Third, create your models.
   package Blog::User;
-  use base qw 'Blog::TableObject';
+  use base qw 'Blog::MoCo';
 
   __PACKAGE__->table('user');
-  __PACKAGE__->primary_keys(['user_id']);
   __PACKAGE__->has_many(
       entries => 'Blog::Entry',
       { key => 'user_id' }
@@ -525,11 +620,9 @@ DBIx::MoCo - Light & Fast Model Component
   1;
 
   package Blog::Entry;
-  use base qw 'Blog::TableObject';
+  use base qw 'Blog::MoCo';
 
   __PACKAGE__->table('entry');
-  __PACKAGE__->primary_keys(['entry_id']);
-  __PACKAGE__->keys(['uri']);
   __PACKAGE__->has_a(
       user => 'Blog::User',
       { key => 'user_id' }
@@ -542,10 +635,9 @@ DBIx::MoCo - Light & Fast Model Component
   1;
 
   package Blog::Bookmark;
-  use base qw 'Blog::TableObject';
+  use base qw 'Blog::MoCo';
 
   __PACKAGE__->table('bookmark');
-  __PACKAGE__->primary_keys(['user_id','entry_id']);
   __PACKAGE__->has_a(
       user => 'Blog::User',
       { key => 'user_id' }
@@ -602,13 +694,203 @@ DBIx::MoCo - Light & Fast Model Component
 
 Light & Fast Model Component
 
+=head1 CLASS METHODS
+
+Here are common class methods of DBIx::MoCo.
+
+=over 4
+
+=item has_a
+
+Defines has_a relationship between 2 models.
+
+=item has_many
+
+Defines has_many relationship between 2 models.
+
+=item retrieve_keys
+
+Defines keys for retrieving by retrieve_all etc.
+If there aren't any unique keys in your table, please specify these keys.
+
+  package Blog::Bookmark;
+
+  __PACKAGE__->retrieve_keys(['user_id', 'entry_id']);
+  # When user can add multiple bookmarks onto same entry.
+
+=item start_session
+
+=item end_session
+
+=item is_in_session
+
+=item cache_status
+
+Returns cache status hash reference.
+cache_status provides retrieve_count, retrieve_cache_count, retrieved_oids
+retrieve_all_count, has_many_count, has_many_cache_count,
+
+=item cache
+
+Set or get cache.
+
+=item flush_cache
+
+Remove given cache value.
+
+=item schema
+
+Returns DBIx::MoCo::Schema object reference related with your model class.
+
+=item primary_keys
+
+=item unique_keys
+
+=item columns
+
+=item retrieve
+
+=item retrieve_or_create
+
+=item retrieve_all
+
+=item retrieve_all_id_hash
+
+=item create
+
+=item delete_all
+
+=item count
+
+=item search
+
+=item retrieve_by_column(_and_column2)
+
+=item retrieve_by_column(_and_column2)_or_create
+
+=item retrieve_by_column_or_column2
+
+=item column_as_something
+
+Inflate column value by using DBIx::MoCo::Column::* plugins.
+If you set up your plugin like this,
+
+  package DBIx::MoCo::Column::MyColumn;
+
+  sub MyColumn {
+    my $self = shift;
+    return "My Column $$self";
+  }
+
+  1;
+
+Then, you can use column_as_MyColumn method
+
+  my $o = MyObject->retrieve(..);
+  print $o->name; # "jkondo"
+  print $o->name_as_MyColumn; # "My Column jkondo";
+
+You can also inflate your column value with blessing with other classes.
+Method name which will be imported must be same as the package name.
+
+=item has_a, has_many auto generated methods
+
+If you define has_a, has_many relationships,
+
+  package Blog::Entry;
+  use base qw 'Blog::MoCo';
+
+  __PACKAGE__->table('entry');
+  __PACKAGE__->has_a(
+      user => 'Blog::User',
+      { key => 'user_id' }
+  );
+  __PACKAGE__->has_many(
+      bookmarks => 'Blog::Bookmark',
+      { key => 'entry_id' }
+  );
+
+You can use those keys as methods.
+
+  my $e = Blog::Entry->retrieve(..);
+  print $e->user; # isa Blog::User
+  print $e->bookmarks; # isa ARRAY of Blog::Bookmark
+
+=back
+
+=head1 CLASS OR INSTANCE METHODS
+
+Here are common class or instance methods of DBIx::MoCo.
+
+=over 4
+
+=item object_id
+
+=item delete
+
+=back
+
+=head1 INSTANCE METHODS
+
+Here are common instance methods of DBIx::MoCo.
+
+=over 4
+
+=item flush
+
+Delete attribute from given attr. name.
+
+=item param
+
+Set or get attribute from given attr. name.
+
+=item set
+
+Set attribute which is not related with DB schema or set temporary.
+
+=item has_primary_keys
+
+=item save
+
+Saves changed columns in session.
+
+=item object_ids
+
+Returns all possible object-ids.
+
+=back
+
+=head1 FORM VALIDATION
+
+You can validate user parameters using moco's schema.
+For example you can define your validation profile using param like this,
+
+  package Blog::User;
+
+  __PACKAGE__->schema->param([
+    name => ['NOT_BLANK', 'ASCII', ['DBIC_UNIQUE', 'Blog::User', 'name']],
+    mail => ['NOT_BLANK', 'EMAIL_LOOSE'],
+  ]);
+
+And then,
+
+  # In your scripts
+  sub validate {
+    my $self = shift;
+    my $q = $self->query;
+    my $prof = Blog::User->schema->param('validation');
+    my $result = FormValidator::Simple->check($q => $prof);
+    # handle errors ...
+  }
+
 =head1 SEE ALSO
 
 L<SQL::Abstract>, L<Class::DBI>, L<Cache>,
 
 =head1 AUTHOR
 
-Junya Kondo, E<lt>jkondo@hatena.comE<gt>, Naoya Ito, E<lt>naoya@hatena.ne.jpE<gt>
+Junya Kondo, E<lt>http://use.perl.org/~jkondo/E<gt>,
+Naoya Ito, E<lt>naoya@hatena.ne.jpE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 

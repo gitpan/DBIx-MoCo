@@ -1,8 +1,10 @@
-package Blog::User;
+package Blog::ReadonlyUser;
 use strict;
 use warnings;
-use base qw 'Blog::Class';
+use base qw(DBIx::MoCo::Readonly);
+use Blog::DataBase;
 
+__PACKAGE__->db_object('Blog::DataBase');
 __PACKAGE__->table('user');
 __PACKAGE__->has_many(
     entries => 'Blog::Entry',

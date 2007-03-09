@@ -5,6 +5,8 @@ use File::Spec;
 use lib File::Spec->catdir('lib');
 use lib File::Spec->catdir('t', 'lib');
 
+#$DBIx::MoCo::DataBase::DEBUG = 1;
+
 ThisTest->runtests;
 
 # ThisTest
@@ -35,6 +37,61 @@ sub new_test : Tests {
     my $pk = Blog::User->primary_keys;
     isa_ok $pk, 'ARRAY';
     is $pk->[0], 'user_id';
+}
+
+sub create : Tests {
+    my $u = Blog::User->create(
+        user_id => 16,
+        name => 'jkontan',
+    );
+    ok $u;
+    isa_ok $u, 'Blog::User';
+    is $u->user_id, 16;
+    is $u->name, 'jkontan';
+}
+
+sub delete : Tests {
+    my $u = Blog::User->create(
+        user_id => 99,
+        name => 'dummy',
+    );
+    ok $u;
+    ok $u->delete;
+    $u = Blog::User->retrieve(99);
+    ok !$u;
+    $u = Blog::User->create(
+        user_id => 99,
+        name => 'dummy',
+    );
+    ok $u;
+    $u = Blog::User->retrieve(99);
+    ok(Blog::User->delete($u));
+    $u = Blog::User->retrieve(99);
+    ok !$u;
+}
+
+sub delete_all : Tests {
+    my $u = Blog::User->create(
+        user_id => 20,
+        name => '20 man',
+    );
+    Blog::Bookmark->create(
+        user_id => 20,
+        entry_id => 10,
+    );
+    Blog::Bookmark->create(
+        user_id => 20,
+        entry_id => 11,
+    );
+    ok $u->bookmarks;
+    ok $u->bookmarks->size >= 2;
+    Blog::Bookmark->delete_all(where => {user_id => 20});
+    my $bs2 = $u->bookmarks;
+    ok $bs2;
+    ok $bs2->size == 0;
+    my $bs = Blog::Bookmark->retrieve_all(where => {user_id => 20});
+    ok $bs;
+    ok $bs->size == 0;
 }
 
 sub has_a : Tests {
@@ -72,37 +129,6 @@ sub retrieve : Tests {
     is $u->name, 'jkondo';
 }
 
-sub create : Tests {
-    my $u = Blog::User->create(
-        user_id => 16,
-        name => 'jkontan',
-    );
-    ok $u;
-    isa_ok $u, 'Blog::User';
-    is $u->user_id, 16;
-    is $u->name, 'jkontan';
-}
-
-sub delete : Tests {
-    my $u = Blog::User->create(
-        user_id => 99,
-        name => 'dummy',
-    );
-    ok $u;
-    ok $u->delete;
-    $u = Blog::User->retrieve(99);
-    ok !$u;
-    $u = Blog::User->create(
-        user_id => 99,
-        name => 'dummy',
-    );
-    ok $u;
-    $u = Blog::User->retrieve(99);
-    ok(Blog::User->delete($u));
-    $u = Blog::User->retrieve(99);
-    ok !$u;
-}
-
 sub retrieve_by : Tests {
     my $u = Blog::User->retrieve_by_user_id(1);
     ok $u;
@@ -116,6 +142,12 @@ sub retrieve_by : Tests {
     ok $b;
     is $b->user_id, 1;
     is $b->entry_id, 3;
+}
+
+sub retrieve_by_or : Tests {
+    my $u = Blog::User->retrieve_by_user_id_or_name('cinnamon');
+    ok $u;
+    is $u->name, 'cinnamon';
 }
 
 sub retrieve_by_or_create : Tests {
@@ -141,6 +173,14 @@ sub retrieve_has_a : Test(5) {
     my $e = $p->entry;
     ok $e;
     is $e->title, 'reikon-1';
+}
+
+sub count : Tests {
+    is (Blog::User->count(name => 'jkondo'), 1);
+    is (Blog::User->count({name => 'jkondo'}), 1);
+    my $all = Blog::User->count + 0;
+    ok ($all > 1);
+    is (Blog::User->count, $all);
 }
 
 sub search : Tests {
@@ -328,30 +368,6 @@ sub has_many_cache_slice : Tests {
     is $bs5->[2], $bs4->[1];
 }
 
-sub delete_all : Tests {
-    my $u = Blog::User->create(
-        user_id => 20,
-        name => '20 man',
-    );
-    Blog::Bookmark->create(
-        user_id => 20,
-        entry_id => 10,
-    );
-    Blog::Bookmark->create(
-        user_id => 20,
-        entry_id => 11,
-    );
-    ok $u->bookmarks;
-    ok $u->bookmarks->size >= 2;
-    Blog::Bookmark->delete_all(where => {user_id => 20});
-    my $bs2 = $u->bookmarks;
-    ok $bs2;
-    ok $bs2->size == 0;
-    my $bs = Blog::Bookmark->retrieve_all(where => {user_id => 20});
-    ok $bs;
-    ok $bs->size == 0;
-}
-
 sub param : Tests {
     my $u = Blog::User->create(
         user_id => 21,
@@ -387,7 +403,7 @@ sub retrieve_or_create : Tests {
 }
 
 sub object_ids : Tests {
-    is_deeply (Blog::Entry->keys, ['uri']);
+    is_deeply (Blog::Entry->unique_keys, ['uri']);
     my $e = Blog::Entry->retrieve(1);
     is_deeply ($e->object_ids, [
         'Blog::Entry-entry_id-1',
