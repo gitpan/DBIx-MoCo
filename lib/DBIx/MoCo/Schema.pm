@@ -23,11 +23,11 @@ sub primary_keys {
     $self->{primary_keys};
 }
 
-sub uniquie_keys {
+sub unique_keys {
     my $self = shift;
     unless ($self->{uniquie_keys}) {
         my $moco = $self->{moco};
-        $self->{uniquie_keys} = $moco->db->unique_keys($moco->table);
+        $self->{unique_keys} = $moco->db->unique_keys($moco->table);
     }
     $self->{unique_keys};
 }

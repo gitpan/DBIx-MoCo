@@ -150,6 +150,9 @@ CLASS METHODS
     primary_keys
     unique_keys
     columns
+    has_column(col_name)
+        Returns which the table has the column or not.
+
     retrieve
     retrieve_or_create
     retrieve_all
@@ -180,7 +183,9 @@ CLASS METHODS
           print $o->name; # "jkondo"
           print $o->name_as_MyColumn; # "My Column jkondo";
 
-        You can also inflate your column value by other classes.
+        You can also inflate your column value with blessing with other
+        classes. Method name which will be imported must be same as the
+        package name.
 
     has_a, has_many auto generated methods
         If you define has_a, has_many relationships,

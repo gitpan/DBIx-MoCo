@@ -13,6 +13,7 @@ use base qw/Test::Class/;
 use Test::More;
 use DBIx::MoCo::Column;
 use Blog::Entry;
+use MySQLUser;
 
 sub use_test : Tests {
     use_ok 'DBIx::MoCo::Column';
@@ -50,6 +51,17 @@ sub my_column : Tests {
     my $title = $e->title;
     ok $title;
     is $e->title_as_MyColumn, 'My Column ' . $title;
+}
+
+sub has_column : Tests {
+    MySQLDB->dbh or return('skipped mysql tests');
+    ok (MySQLUser->has_column('User'));
+    ok (!MySQLUser->has_column('fake'));
+    my $u = MySQLUser->search(where => '1 = 1')->first;
+    $u or return;
+    ok $u;
+    ok ($u->has_column('User'), 'User');
+    ok (!$u->has_column('fake'), 'fake');
 }
 
 1;

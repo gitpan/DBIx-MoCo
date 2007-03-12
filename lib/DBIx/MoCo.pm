@@ -10,7 +10,7 @@ use Carp;
 use Class::Trigger;
 use UNIVERSAL::require;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 our $AUTOLOAD;
 our $cache_status = {
     retrieve_count => 0,
@@ -158,12 +158,19 @@ sub primary_keys {
 
 sub unique_keys {
     my $class = shift;
-    $class->schema->primary_keys;
+    $class->schema->unique_keys;
 }
 
 sub columns {
     my $class = shift;
     $class->schema->columns;
+}
+
+sub has_column {
+    my $class = shift;
+    my $col = shift or return;
+    $class->columns or return;
+    grep { $col eq $_ } @{$class->columns};
 }
 
 # oid, db, create, retrieve..
@@ -477,7 +484,7 @@ sub _retrieve_by_or_create_handler {
         my $self = shift;
         my %args;
         @args{@keys} = @_;
-        $self->retrieve(%args) || $class->create(%args);
+        return $self->retrieve(%args) || $class->create(%args);
     };
 }
 
@@ -747,6 +754,10 @@ Returns DBIx::MoCo::Schema object reference related with your model class.
 =item unique_keys
 
 =item columns
+
+=item has_column(col_name)
+
+Returns which the table has the column or not.
 
 =item retrieve
 

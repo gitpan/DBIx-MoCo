@@ -14,6 +14,7 @@ WriteMakefile(
         Test::Class => 0,
         FormValidator::Simple => 0,
         URI => 0,
+        UNIVERSAL::require => 0,
     },
     ($] >= 5.005 ?
       (ABSTRACT_FROM  => 'lib/DBIx/MoCo.pm',

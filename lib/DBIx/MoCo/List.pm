@@ -189,6 +189,12 @@ sub grep {
     wantarray ? @grepped : $self->new(\@grepped);
 }
 
+sub find {
+    my ($self, $code) = @_;
+    croak "Argument must be a code" unless ref $code eq 'CODE';
+    for (@$self) { &$code and return $_ }
+}
+
 sub sort {
     my ($self, $code) = @_;
     my @sorted = $code ? CORE::sort { $code->($a, $b) } @$self : CORE::sort @$self;
