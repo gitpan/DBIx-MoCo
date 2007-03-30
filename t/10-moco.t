@@ -200,6 +200,12 @@ sub search : Tests {
     is $u->name, 'cinnamon';
 }
 
+sub find : Tests {
+    my $u = Blog::User->find({name => 'jkondo'});
+    ok $u;
+    is ($u->name, 'jkondo');
+}
+
 sub retrieve_all : Tests {
     my $b1 = Blog::Bookmark->retrieve_all(
         where => {user_id => 1},

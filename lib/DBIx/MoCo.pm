@@ -9,8 +9,9 @@ use DBIx::MoCo::Column;
 use Carp;
 use Class::Trigger;
 use UNIVERSAL::require;
+use Scalar::Util qw(weaken);
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 our $AUTOLOAD;
 our $cache_status = {
     retrieve_count => 0,
@@ -28,8 +29,9 @@ __PACKAGE__->mk_classdata($_) for qw(cache_object db_object table
                                      retrieve_keys _schema);
 
 __PACKAGE__->add_trigger(after_create => \&_after_create);
-__PACKAGE__->add_trigger(after_delete => \&_after_delete);
+__PACKAGE__->add_trigger(before_update => \&_before_update);
 __PACKAGE__->add_trigger(after_update => \&_after_update);
+__PACKAGE__->add_trigger(before_delete => \&_before_delete);
 
 __PACKAGE__->cache_object('DBIx::MoCo::Cache');
 
@@ -66,19 +68,29 @@ sub save_changed {
 sub _after_create {
     my ($class, $self) = @_;
     $self or return;
-    $class->cache($_, $self) for @{$self->object_ids};
+    $self->store_self_cache;
     $class->_flush_belongs_to($self);
 }
 
-sub _after_delete {
+sub _before_update {
+    my ($class, $self) = @_;
+    $self or return;
+    $self->flush_self_cache;
+}
+
+sub _after_update {
+    my ($class, $self) = @_;
+    $self or return;
+    $self->store_self_cache;
+}
+
+sub _before_delete {
     my ($class, $self) = @_;
     $self or return;
     #warn 'delete '.$self->object_id;
-    $class->flush_cache($self);
+    $self->flush_self_cache;
     $class->_flush_belongs_to($self);
 }
-
-sub _after_update {}
 
 # Cache
 sub cache_status { $cache_status };
@@ -116,11 +128,19 @@ sub cache {
     return $cache->get($k);
 }
 
-sub flush_cache {
-    my $class = shift;
-    my $o = shift or return;
-    #warn "flush cache $o";
-    $cache->remove($_) for @{$o->object_ids};
+sub flush_self_cache {
+    my $self = shift;
+    my $class = ref $self or return;
+    for (@{$self->object_ids}) {
+        weaken($class->cache($_));
+        $cache->remove($_);
+    }
+}
+
+sub store_self_cache {
+    my $self = shift;
+    my $class = ref $self or return;
+    $class->cache($_, $self) for @{$self->object_ids};
 }
 
 # Relations
@@ -221,15 +241,12 @@ sub retrieve {
         my $res = $class->db->select($class->table,'*',\%args);
         my $h = $res->[0];
         my $o = $h ? $class->new(%$h) : '';
-        if ($o && ($oid ne $o->object_id)) {
-            my $oid2 = $o->object_id;
-            if (defined $class->cache($oid2)) {
-                $o = $class->cache($oid2);
-            } else {
-                $class->cache($oid2 => $o);
-            }
+        if ($o) {
+            $o->store_self_cache;
+        } else {
+            # $class->cache($oid => $o) if $o;
+            $class->cache($oid => $o); # cache null object for performance.
         }
-        $class->cache($oid => $o);
         return $o;
     }
 }
@@ -289,13 +306,14 @@ sub delete {
     my $class = ref($self) ? ref($self) : $self;
     $self = shift unless ref($self);
     $self or return;
+    $self->call_trigger('before_delete', $self);
     my %args;
     for (@{$class->primary_keys}) {
         $args{$_} = $self->{$_} or die "$self doesn't have $_";
     }
-    $class->db->delete($class->table,\%args) or croak 'couldnt delete';
-    $class->call_trigger('after_delete', $self);
-    return 1;
+    my $res = $class->db->delete($class->table,\%args) or croak 'couldnt delete';
+    $self = undef;
+    return $res;
 }
 
 sub delete_all {
@@ -309,8 +327,8 @@ sub delete_all {
         my $c = $class->cache($oid) or next;
         push @$caches, $c;
     }
+    $class->call_trigger('before_delete', $_) for (@$caches);
     $class->db->delete($class->table,$args{where}) or croak 'couldnt delete';
-    $class->call_trigger('after_delete', $_) for (@$caches);
     return 1;
 }
 
@@ -333,6 +351,21 @@ sub search {
     $_ = $class->new(%$_) for (@$res);
     wantarray ? @$res :
         DBIx::MoCo::List->new($res);
+}
+
+sub find {
+    my $class = shift;
+    my $where = shift or return;
+    $class->search(
+        where => $where,
+        offset => 0,
+        limit => 1,
+    )->first;
+}
+
+sub quote {
+    my $class = shift;
+    $class->db->dbh->quote(shift);
 }
 
 # new
@@ -445,7 +478,7 @@ sub _has_many_handler {
         if (defined $off && $lt) {
             return DBIx::MoCo::List->new(
                 [@{$self->{$method}}[$off .. $max_off - 1]],
-            );
+            )->compact;
         } else {
             return $self->{$method};
         }
@@ -506,6 +539,7 @@ sub param {
     my $class = ref $self or return;
     return $self->{$_[0]} unless defined($_[1]);
     @_ % 2 and croak "You gave me an odd number of parameters to param()!";
+    $class->call_trigger('before_update', $self);
     my %args = @_;
     $self->{$_} = $args{$_} for (keys %args);
     if ($class->is_in_session) {
@@ -572,7 +606,8 @@ sub save {
 sub object_ids { # returns all possible oids
     my $self = shift;
     my $class = ref $self or return;
-    my $oids = {$self->object_id => 1};
+    my $oids = {};
+    $oids->{$self->object_id} = 1 if $self->object_id;
     for my $key (@{$class->unique_keys}) {
         next unless $self->{$key};
         my $oid = $class->object_id($key => $self->{$key}) or next;
@@ -701,6 +736,52 @@ DBIx::MoCo - Light & Fast Model Component
 
 Light & Fast Model Component
 
+=head1 CACHE ALGORITHM
+
+MoCo caches objects effectively.
+There are 3 functions to control MoCo's cache. Their functions are called 
+appropriately when some operations are called to a particular object.
+
+Here are the 3 functions.
+
+=over 4
+
+=item store_self_cache
+
+Stores self instance for all own possible object ids.
+
+=item flush_self_cache
+
+Flushes all caches for all own possible object ids.
+
+=item _flush_belongs_to
+
+Flushes all caches whose have has_many arrays including the object.
+
+=back
+
+And, here are the triggers which call their functions.
+
+=over 4
+
+=item _after_create
+
+Calls C<store_self_cache> and C<_flush_belongs_to>.
+
+=item _before_update
+
+Calls C<flush_self_cache>.
+
+=item _after_update
+
+Calls C<store_self_cache>.
+
+=item _before_delete
+
+Calls C<flush_self_cache> and C<_flush_belongs_to>.
+
+=back
+
 =head1 CLASS METHODS
 
 Here are common class methods of DBIx::MoCo.
@@ -741,10 +822,6 @@ retrieve_all_count, has_many_count, has_many_cache_count,
 
 Set or get cache.
 
-=item flush_cache
-
-Remove given cache value.
-
 =item schema
 
 Returns DBIx::MoCo::Schema object reference related with your model class.
@@ -774,6 +851,10 @@ Returns which the table has the column or not.
 =item count
 
 =item search
+
+=item find
+
+Similar to search, but returns only the first item as a reference (not array).
 
 =item retrieve_by_column(_and_column2)
 
@@ -839,6 +920,8 @@ Here are common class or instance methods of DBIx::MoCo.
 
 =item delete
 
+=item quote
+
 =back
 
 =head1 INSTANCE METHODS
@@ -846,6 +929,14 @@ Here are common class or instance methods of DBIx::MoCo.
 Here are common instance methods of DBIx::MoCo.
 
 =over 4
+
+=item flush_self_cache
+
+Flush caches for self possible object ids.
+
+=item store_self_cache
+
+Store self into cache for possible object ids.
 
 =item flush
 

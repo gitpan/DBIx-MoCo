@@ -7,6 +7,7 @@ WriteMakefile(
         SQL::Abstract => 0,
         DBI => 0,
         DBD::SQLite => 0,
+        Scalar::Util => 0,
         List::Util => 0,
         List::MoreUtils => 0,
         Exporter => 0,

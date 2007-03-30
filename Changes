@@ -1,5 +1,12 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.09 Fri Mar 30 2007
+	- Fixed retrieve null cache problem
+ 	- Added store(flush)_self_cache method for solving that
+	- Changed to not to cache when retrieve has failed
+	- Added quote method to MoCo
+	- Added find method to MoCo
+
 0.08 Mon Mar 12 2007
 	- Fixed unique_keys problem. (Sorry for misspelling)
 	- Added has_column method to DBIx::MoCo

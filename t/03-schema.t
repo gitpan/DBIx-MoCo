@@ -30,7 +30,7 @@ sub primary_keys : Tests {
 sub unique_keys : Tests {
     my $uk = Blog::User->unique_keys;
     ok $uk;
-    is_deeply $uk, ['user_id'], 'user uniq keys';
+    is_deeply $uk, ['user_id', 'name'], 'user uniq keys';
 }
 
 sub columns : Tests {

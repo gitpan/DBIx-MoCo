@@ -111,6 +111,36 @@ SYNOPSIS
 DESCRIPTION
     Light & Fast Model Component
 
+CACHE ALGORITHM
+    MoCo caches objects effectively. There are 3 functions to control MoCo's
+    cache. Their functions are called appropriately when some operations are
+    called to a particular object.
+
+    Here are the 3 functions.
+
+    store_self_cache
+        Stores self instance for all own possible object ids.
+
+    flush_self_cache
+        Flushes all caches for all own possible object ids.
+
+    _flush_belongs_to
+        Flushes all caches whose have has_many arrays including the object.
+
+    And, here are the triggers which call their functions.
+
+    _after_create
+        Calls "store_self_cache" and "_flush_belongs_to".
+
+    _before_update
+        Calls "flush_self_cache".
+
+    _after_update
+        Calls "store_self_cache".
+
+    _before_delete
+        Calls "flush_self_cache" and "_flush_belongs_to".
+
 CLASS METHODS
     Here are common class methods of DBIx::MoCo.
 
@@ -140,9 +170,6 @@ CLASS METHODS
     cache
         Set or get cache.
 
-    flush_cache
-        Remove given cache value.
-
     schema
         Returns DBIx::MoCo::Schema object reference related with your model
         class.
@@ -161,6 +188,10 @@ CLASS METHODS
     delete_all
     count
     search
+    find
+        Similar to search, but returns only the first item as a reference
+        (not array).
+
     retrieve_by_column(_and_column2)
     retrieve_by_column(_and_column2)_or_create
     retrieve_by_column_or_column2
@@ -214,9 +245,16 @@ CLASS OR INSTANCE METHODS
 
     object_id
     delete
+    quote
 
 INSTANCE METHODS
     Here are common instance methods of DBIx::MoCo.
+
+    flush_self_cache
+        Flush caches for self possible object ids.
+
+    store_self_cache
+        Store self into cache for possible object ids.
 
     flush
         Delete attribute from given attr. name.

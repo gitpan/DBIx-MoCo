@@ -9,6 +9,7 @@ t/03-schema.t
 t/04-join.t
 t/05-methods.t
 t/06-column.t
+t/07-null-cache.t
 t/10-moco.t
 t/11-cache-memory.t
 t/12-moco-session.t

@@ -36,6 +36,12 @@ sub remove {
     $cache->{$k} = undef;
 }
 
+sub cache_expire {
+    my $class = shift;
+    $cache_expire = $_[0] if $_[0];
+    $cache_expire;
+}
+
 1;
 
 =head1 NAME
