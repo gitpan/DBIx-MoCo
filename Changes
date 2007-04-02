@@ -1,5 +1,8 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.10 Mon Apr 2 2007
+	- Added before_create trigger to MoCo
+
 0.09 Fri Mar 30 2007
 	- Fixed retrieve null cache problem
  	- Added store(flush)_self_cache method for solving that

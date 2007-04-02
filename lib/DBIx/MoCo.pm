@@ -11,7 +11,7 @@ use Class::Trigger;
 use UNIVERSAL::require;
 use Scalar::Util qw(weaken);
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 our $AUTOLOAD;
 our $cache_status = {
     retrieve_count => 0,
@@ -284,6 +284,7 @@ sub retrieve_all_id_hash {
 sub create {
     my $class = shift;
     my %args = @_;
+    $class->call_trigger('before_create', \%args);
     my $o = $class->new(%args);
     if ($class->is_in_session && $o->has_primary_keys) {
         $o->set(to_be_inserted => 1);
@@ -788,6 +789,31 @@ Here are common class methods of DBIx::MoCo.
 
 =over 4
 
+=item add_trigger
+
+Adds triggers. Here are the types which called from DBIx::MoCo.
+
+  before_create
+  after_create
+  before_update
+  after_update
+  before_delete
+
+You can add your trigger like this.
+
+  package Blog::User;
+  __PACKAGE__->add_trigger(before_create => sub
+    my ($class, $args) = @_;
+    $args->{name} .= '-san';
+  });
+
+  # in your scripts
+  my $u = Blog::User->create(name => 'ishizaki');
+  is ($u->name, 'ishizaki-san'); # ok.
+
+C<before_create> passes a hash reference of new object data as the
+second argument, and all other triggers pass the instance C<$self>.
+
 =item has_a
 
 Defines has_a relationship between 2 models.
@@ -991,7 +1017,7 @@ L<SQL::Abstract>, L<Class::DBI>, L<Cache>,
 
 =head1 AUTHOR
 
-Junya Kondo, E<lt>http://use.perl.org/~jkondo/E<gt>,
+Junya Kondo, E<lt>http://jkondo.vox.com/E<gt>,
 Naoya Ito, E<lt>naoya@hatena.ne.jpE<gt>
 
 =head1 COPYRIGHT AND LICENSE
