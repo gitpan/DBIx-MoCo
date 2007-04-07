@@ -11,7 +11,7 @@ use Class::Trigger;
 use UNIVERSAL::require;
 use Scalar::Util qw(weaken);
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 our $AUTOLOAD;
 our $cache_status = {
     retrieve_count => 0,
@@ -69,7 +69,7 @@ sub _after_create {
     my ($class, $self) = @_;
     $self or return;
     $self->store_self_cache;
-    $class->_flush_belongs_to($self);
+    $class->flush_belongs_to($self);
 }
 
 sub _before_update {
@@ -89,13 +89,13 @@ sub _before_delete {
     $self or return;
     #warn 'delete '.$self->object_id;
     $self->flush_self_cache;
-    $class->_flush_belongs_to($self);
+    $class->flush_belongs_to($self);
 }
 
 # Cache
 sub cache_status { $cache_status };
 
-sub _flush_belongs_to {
+sub flush_belongs_to {
     my ($class, $self) = @_;
     $self or return;
     for my $attr (keys %{$class->has_a}) {
@@ -132,6 +132,7 @@ sub flush_self_cache {
     my $self = shift;
     my $class = ref $self or return;
     for (@{$self->object_ids}) {
+        # warn "flush $_";
         weaken($class->cache($_));
         $cache->remove($_);
     }
@@ -140,6 +141,7 @@ sub flush_self_cache {
 sub store_self_cache {
     my $self = shift;
     my $class = ref $self or return;
+    # warn "store $_" for @{$self->object_ids};
     $class->cache($_, $self) for @{$self->object_ids};
 }
 
@@ -231,11 +233,11 @@ sub retrieve {
     my $class = shift;
     my $oid = $class->object_id(@_);
     if (defined $class->cache($oid)) {
-        #warn "use cache $oid";
+        # warn "use cache $oid";
         $cs->{retrieve_cache_count}++;
         return $class->cache($oid);
     } else {
-        #warn "use db $oid";
+        # warn "use db $oid";
         push @{$cs->{retrieved_oids}}, $oid if $class->is_in_session;
         my %args = $_[1] ? @_ : ($class->primary_keys->[0] => $_[0]);
         my $res = $class->db->select($class->table,'*',\%args);
@@ -274,10 +276,14 @@ sub retrieve_all {
 sub retrieve_all_id_hash {
     my $class = shift;
     my %args = @_;
-    ref $args{where} eq 'HASH' or die 'please specify where in hash';
-    my $res = $class->db->select($class->table,
-                                 $class->retrieve_keys || $class->primary_keys,
-                                 $args{where},$args{order},\%args);
+#     ref $args{where} eq 'HASH' or die 'please specify where in hash';
+#     my $res = $class->db->select($class->table,
+#                                  $class->retrieve_keys || $class->primary_keys,
+#                                  $args{where},$args{order},\%args);
+#     return $res;
+    $args{table} = $class->table;
+    $args{field} = join(',', @{$class->retrieve_keys || $class->primary_keys});
+    my $res = $class->db->search(%args);
     return $res;
 }
 
@@ -397,9 +403,11 @@ sub AUTOLOAD {
         *$AUTOLOAD = $class->_has_a_handler($method);
     } elsif ($class->has_many->{$method}) {
         *$AUTOLOAD = $class->_has_many_handler($method);
-#    } elsif (defined $self->{$method}) {
+    } elsif ($class->has_column($method)) {
+        *$AUTOLOAD = sub { shift->param($method, @_) };
     } else {
         *$AUTOLOAD = sub { shift->param($method, @_) };
+        # die "undefined method $method";
     }
     goto &$AUTOLOAD;
 }
@@ -431,11 +439,15 @@ sub _has_a_handler {
         my $self = shift;
         unless (defined $self->{$method}) {
             my $key = $rel->{option}->{key} or return;
+            my $v;
             if (ref($key) eq 'HASH') {
-                ($key) = keys %$key;
+                my $mykey;
+                ($mykey, $key) = %$key;
+                $v = $self->{$mykey};
+            } else {
+                $v = $self->{$key};
             }
-            my $id = $self->{$key} or return;
-            $self->{$method} = $rel->{class}->retrieve($id);
+            $self->{$method} = $rel->{class}->retrieve($key => $v);
         }
         return $self->{$method};
     }
@@ -460,18 +472,22 @@ sub _has_many_handler {
             $cs->{has_many_cache_count}++;
         } else {
             my $key = $rel->{option}->{key} or return;
-            my ($k, $v);
+            my ($where, $v);
             if (ref $key eq 'HASH') {
-                my $my_key;
-                ($my_key, $k) = %$key;
-                $v = $self->{$my_key} or return;
+                my ($k1, $k2) = %$key;
+                $where = "$k2 = ?";
+                $v = $self->{$k1} or return;
             } else {
-                $k = $key;
-                $v = $self->{$k} or return;
+                $where = "$key = ?";
+                $v = $self->{$key} or return;
+            }
+            if ($rel->{option}->{condition}) {
+                $where .= ' and ' . $rel->{option}->{condition};
             }
             $self->{$method} = $rel->{class}->retrieve_all(
-                where => {$k => $v},
+                where => [$where, $v],
                 order => $rel->{option} ? $rel->{option}->{order} || '' : '',
+                group => $rel->{option} ? $rel->{option}->{group} || '' : '',
                 limit => $max_off > 0 ? $max_off : '',
             );
             $self->{$max_key} = $max_off;
@@ -755,7 +771,7 @@ Stores self instance for all own possible object ids.
 
 Flushes all caches for all own possible object ids.
 
-=item _flush_belongs_to
+=item flush_belongs_to
 
 Flushes all caches whose have has_many arrays including the object.
 
@@ -767,7 +783,7 @@ And, here are the triggers which call their functions.
 
 =item _after_create
 
-Calls C<store_self_cache> and C<_flush_belongs_to>.
+Calls C<store_self_cache> and C<flush_belongs_to>.
 
 =item _before_update
 
@@ -779,7 +795,7 @@ Calls C<store_self_cache>.
 
 =item _before_delete
 
-Calls C<flush_self_cache> and C<_flush_belongs_to>.
+Calls C<flush_self_cache> and C<flush_belongs_to>.
 
 =back
 
@@ -821,6 +837,26 @@ Defines has_a relationship between 2 models.
 =item has_many
 
 Defines has_many relationship between 2 models.
+You can define additional conditions as below.
+
+  Blog::User->has_many(
+    root_messages => 'Blog::Message', {
+      key => {name => 'to_name'},
+      condition => 'reference_id is null',
+      order => 'modified desc',
+    },
+  );
+
+C<condition> is additional sql statement will be used in where condition.
+C<order> is used for specifying order statement.
+In above case, SQL statement will be ..
+
+  SELECT message_id FROM message
+  WHERE to_name = 'myname' AND reference_id is null
+  ORDER BY modified desc
+
+And, all each results will be inflated as Blog::Message by retrieving
+(with using cache) all records again.
 
 =item retrieve_keys
 

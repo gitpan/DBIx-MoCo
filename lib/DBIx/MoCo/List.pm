@@ -195,6 +195,14 @@ sub find {
     for (@$self) { &$code and return $_ }
 }
 
+sub index_of {
+    my ($self, $target) = @_;
+    my $code = (ref $target eq 'CODE') ? $target : sub { CORE::shift eq $target };
+    for (my $i = 0; $i < $self->length; $i++) {
+        &$code($self->[$i]) and return $i;
+    }
+}
+
 sub sort {
     my ($self, $code) = @_;
     my @sorted = $code ? CORE::sort { $code->($a, $b) } @$self : CORE::sort @$self;
@@ -277,6 +285,22 @@ DBIx::MoCo::List - Array iterator for DBIx::MoCo.
   $list->size; # 2
   my @names = $list->map_name; # ('jkondo','cinnamon')
   my $first = $list->pop; # first hash
+
+=head1 METHODS
+
+=over 4
+
+=item index_of
+
+Returns index of given target or given code returns true.
+
+  my $list = DBIx::MoCo::List->new([0,1,2,3]);
+  ok ($list, 'list');
+  is ($list->index_of(1), 1, 'index of 1');
+  ok (!$list->index_of(4), 'index of 4');
+  is ($list->index_of(sub { shift == 2 }), 2, 'index of sub(2)');
+
+=back
 
 =head1 SEE ALSO
 

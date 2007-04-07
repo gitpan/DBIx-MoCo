@@ -1,5 +1,11 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.11 Sat Apr 7 2007
+	- Added index_of to DBIx::MoCo::List
+	- Changed _flush_belongs_to to flush_belongs_to for calling from other modules
+	- Changed retrieve_all_id_hash using DB->search for additional condition
+	- Added additional condition to has_many definition
+
 0.10 Mon Apr 2 2007
 	- Added before_create trigger to MoCo
 

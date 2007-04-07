@@ -124,13 +124,13 @@ CACHE ALGORITHM
     flush_self_cache
         Flushes all caches for all own possible object ids.
 
-    _flush_belongs_to
+    flush_belongs_to
         Flushes all caches whose have has_many arrays including the object.
 
     And, here are the triggers which call their functions.
 
     _after_create
-        Calls "store_self_cache" and "_flush_belongs_to".
+        Calls "store_self_cache" and "flush_belongs_to".
 
     _before_update
         Calls "flush_self_cache".
@@ -139,7 +139,7 @@ CACHE ALGORITHM
         Calls "store_self_cache".
 
     _before_delete
-        Calls "flush_self_cache" and "_flush_belongs_to".
+        Calls "flush_self_cache" and "flush_belongs_to".
 
 CLASS METHODS
     Here are common class methods of DBIx::MoCo.
@@ -172,7 +172,27 @@ CLASS METHODS
         Defines has_a relationship between 2 models.
 
     has_many
-        Defines has_many relationship between 2 models.
+        Defines has_many relationship between 2 models. You can define
+        additional conditions as below.
+
+          Blog::User->has_many(
+            root_messages => 'Blog::Message', {
+              key => {name => 'to_name'},
+              condition => 'reference_id is null',
+              order => 'modified desc',
+            },
+          );
+
+        "condition" is additional sql statement will be used in where
+        condition. "order" is used for specifying order statement. In above
+        case, SQL statement will be ..
+
+          SELECT message_id FROM message
+          WHERE to_name = 'myname' AND reference_id is null
+          ORDER BY modified desc
+
+        And, all each results will be inflated as Blog::Message by
+        retrieving (with using cache) all records again.
 
     retrieve_keys
         Defines keys for retrieving by retrieve_all etc. If there aren't any

@@ -107,6 +107,15 @@ sub has_a : Tests {
     is $has_a->{entry}->{option}->{key}, 'entry_id';
 }
 
+sub retrieve_all_id_hash : Tests {
+    my $bs = Blog::Bookmark->retrieve_all_id_hash(
+        where => {user_id => 1},
+    );
+    ok ($bs, 'retrieve_all_id_hash');
+    ok ($bs->[0], 'has item');
+    isa_ok ($bs->[0], 'HASH', 'item');
+}
+
 sub has_many : Test(5) {
     my $has_many = Blog::User->has_many;
     ok $has_many;
@@ -148,6 +157,12 @@ sub retrieve_by_or : Tests {
     my $u = Blog::User->retrieve_by_user_id_or_name('cinnamon');
     ok $u;
     is $u->name, 'cinnamon';
+    my $u2 = Blog::User->retrieve_by_user_id_or_name(3);
+    ok $u2;
+    is $u2->name, 'cinnamon';
+    my $u3 = Blog::User->retrieve_by_name_or_mail('cinnamon');
+    ok($u3, 'retrieve_by_name_or_mail');
+    is($u3->name, 'cinnamon', 'is cinnamon');
 }
 
 sub retrieve_by_or_create : Tests {
