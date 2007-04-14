@@ -67,7 +67,7 @@ sub _search_sql {
     my $sql = "SELECT $field FROM " . $args->{table};
     $sql .= " USE INDEX ($args->{use_index})" if $args->{use_index};
     my ($where,@binds) = $class->_parse_where($args->{where});
-    $sql .= $where;
+    $sql .= $where if $where;
     $sql .= " GROUP BY $args->{group}" if $args->{group};
     $sql .= " ORDER BY $args->{order}" if $args->{order};
     $sql .= $class->_parse_limit($args);
@@ -101,7 +101,7 @@ sub _parse_where {
         return (' WHERE ' . $sql, @$binds);
     } elsif (ref $where eq 'HASH') {
         return $sqla->where($where);
-    } else {
+    } elsif ($where) {
         return ' WHERE ' . $where;
     }
     return $where;

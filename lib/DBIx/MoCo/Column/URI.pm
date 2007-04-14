@@ -8,4 +8,10 @@ sub URI {
     return URI->new($$self);
 }
 
+sub URI_as_string {
+    my $class = shift;
+    my $uri = shift or return;
+    return $uri->as_string;
+}
+
 1;

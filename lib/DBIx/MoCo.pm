@@ -11,7 +11,7 @@ use Class::Trigger;
 use UNIVERSAL::require;
 use Scalar::Util qw(weaken);
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 our $AUTOLOAD;
 our $cache_status = {
     retrieve_count => 0,
@@ -339,17 +339,6 @@ sub delete_all {
     return 1;
 }
 
-sub count {
-    my $class = shift;
-    my $args;
-    if (ref($_[0]) eq 'HASH') { # for FormValidator::Simple::Plugin::DBIC::UNIQUE
-        $args = shift;
-    } else {
-        %$args = @_;
-    }
-    $class->db->select($class->table,'count(*) as count',$args)->[0]->{count};
-}
-
 sub search {
     my $class = shift;
     my %args = @_;
@@ -358,6 +347,16 @@ sub search {
     $_ = $class->new(%$_) for (@$res);
     wantarray ? @$res :
         DBIx::MoCo::List->new($res);
+}
+
+sub count {
+    my $class = shift;
+    my $where = shift;
+    $class->db->search(
+        table => $class->table,
+        field => 'COUNT(*) as count',
+        where => $where || '',
+    )->[0]->{count};
 }
 
 sub find {
@@ -396,9 +395,9 @@ sub AUTOLOAD {
         my ($by, $create) = ($1,$2);
         *$AUTOLOAD = $create ? $class->_retrieve_by_or_create_handler($by) :
             $class->_retrieve_by_handler($by);
-    } elsif ($method =~ /^(\w+)_as_(\w+)$/) {
+    } elsif ($method =~ /^(\w+)_as_(\w+)$/o) {
         my ($col,$as) = ($1,$2);
-        *$AUTOLOAD = $class->_column_as_handler($col,$as);
+        *$AUTOLOAD = $class->_column_as_handler($col, $as);
     } elsif ($class->has_a->{$method}) {
         *$AUTOLOAD = $class->_has_a_handler($method);
     } elsif ($class->has_many->{$method}) {
@@ -414,7 +413,7 @@ sub AUTOLOAD {
 
 sub _column_as_handler {
     my $class = shift;
-    my ($col,$as) = @_;
+    my ($colname, $as) = @_;
     unless (DBIx::MoCo::Column->can($as)) {
         my $plugin = "DBIx::MoCo::Column::$as";
         $plugin->require;
@@ -426,9 +425,22 @@ sub _column_as_handler {
     }
     return sub {
         my $self = shift;
-        my $v = $self->$col or return;
-        $self->column($col)->$as();
+        my $column = $self->column($colname) or return;
+        if (my $new = shift) {
+            my $as_string = $as . '_as_string'; # e.g. URI_as_string
+            my $v = $column->can($as_string) ?
+                $column->$as_string($new) : scalar $new;
+            $self->param($colname => $v);
+        }
+        $self->column($colname)->$as();
     }
+}
+
+sub column {
+    my $self = shift;
+    my $col = shift or return;
+    my $v = $self->{$col} or return;
+    return DBIx::MoCo::Column->new($v);
 }
 
 sub _has_a_handler {
@@ -440,6 +452,7 @@ sub _has_a_handler {
         unless (defined $self->{$method}) {
             my $key = $rel->{option}->{key} or return;
             my $v;
+            # warn "$class -> $method" , %$rel;
             if (ref($key) eq 'HASH') {
                 my $mykey;
                 ($mykey, $key) = %$key;
@@ -547,7 +560,7 @@ sub DESTROY {
 sub flush {
     my $self = shift;
     my $attr = shift or return;
-    #warn "flush " . $self->object_id . '->' . $attr;
+    # warn "flush " . $self->object_id . '->' . $attr;
     $self->{$attr} = undef;
 }
 
@@ -572,13 +585,6 @@ sub param {
     }
     $class->call_trigger('after_update', $self);
     return 1;
-}
-
-sub column {
-    my $self = shift;
-    my $col = shift or return;
-    my $v = $self->{$col} or return;
-    return DBIx::MoCo::Column->new($v);
 }
 
 sub set {
@@ -910,9 +916,54 @@ Returns which the table has the column or not.
 
 =item delete_all
 
+=item search
+
+You can specify search condition in 3 diferrent ways. "Hash reference style",
+"Array reference style" and "Scalar style".
+
+Hash reference style is same as SQL::Abstract style and like this.
+
+  Blog::User->search(where => {name => 'jkondo'});
+
+Array style is the most flexible. You can use placeholder.
+
+  Blog::User->search(
+    where => ['name = ?', 'jkondo'],
+  );
+  Blog::User->search(
+    where => ['name in (?,?)', 'jkondo', 'cinnamon'],
+  );
+  Blog::Entry->search(
+    where => ['name = :name and date like :date'],
+             name => 'jkondo', date => '2007-04%'],
+  );
+
+Scalar style is the simplest one, and most flexible in other word.
+
+  Blog::Entry->search(
+    where => "name = 'jkondo' and DATE_ADD(date, INTERVAL 1 DAY) > NOW()',
+  );
+
+You can also specify C<field>, C<order>, C<offset>, C<limit>, C<group> too.
+Full spec search statement will be like the following.
+
+  Blog::Entry->search(
+    field => 'entry_id',
+    where => ['name = ?', 'jkondo'],
+    order => 'created desc',
+    offset => 0,
+    limit => 1,
+    group => 'title',
+  );
+
 =item count
 
-=item search
+Returns the count of results matched with given condition. You can specify
+the condition in same way as C<search>'s where spec.
+
+  Blog::User->count({name => 'jkondo'}); # Hash reference style
+  Blog::User->count(['name => ?', 'jkondo']); # Array reference style
+  Blog::User->count("name => 'jkondo'"); # Scalar style
 
 =item find
 
@@ -929,23 +980,34 @@ Similar to search, but returns only the first item as a reference (not array).
 Inflate column value by using DBIx::MoCo::Column::* plugins.
 If you set up your plugin like this,
 
-  package DBIx::MoCo::Column::MyColumn;
+  package DBIx::MoCo::Column::URI;
 
-  sub MyColumn {
+  sub URI {
     my $self = shift;
-    return "My Column $$self";
+    return URI->new($$self);
+  }
+
+  sub URI_as_string {
+    my $class = shift;
+    my $uri = shift or return;
+    return $uri->as_string;
   }
 
   1;
 
-Then, you can use column_as_MyColumn method
+Then, you can use column_as_URI method as following,
 
-  my $o = MyObject->retrieve(..);
-  print $o->name; # "jkondo"
-  print $o->name_as_MyColumn; # "My Column jkondo";
+  my $e = MyEntry->retrieve(..);
+  print $e->uri; # 'http://test.com/test'
+  print $e->uri_as_URI->host; # 'test.com';
 
-You can also inflate your column value with blessing with other classes.
-Method name which will be imported must be same as the package name.
+  my $uri = URI->new('http://www.test.com/test');
+  $e->uri_as_URI($uri); # set uri by using URI instance
+
+The name of infrate method which will be imported must be same as the package name.
+
+If you don't define "as string" method (such as C<URI_as_string>), 
+scalar evaluated value of given argument will be used for new value instead.
 
 =item has_a, has_many auto generated methods
 

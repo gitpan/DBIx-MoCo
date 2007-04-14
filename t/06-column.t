@@ -43,6 +43,14 @@ sub uri : Tests {
     ok $uri;
     isa_ok $uri, 'URI';
     is $uri->host, 'test.com';
+    my $uri2 = URI->new('http://www.test.com/uri2');
+    $e->uri_as_URI($uri2);
+    ok ($e->uri, 'uri2');
+    is ($e->uri, $uri2->as_string, 'uri2 as string');
+    my $uri3 = $e->uri_as_URI;
+    ok ($uri3, 'uri3');
+    isa_ok ($uri3, 'URI', 'uri3 isa URI');
+    is ($uri3->as_string, $uri2->as_string, 'uri2 eq uri3');
 }
 
 sub my_column : Tests {

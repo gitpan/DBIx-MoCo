@@ -19,27 +19,38 @@ DBIx::MoCo::Column - Scalar blessed class for inflating columns.
 Inflate column value by using DBIx::MoCo::Column::* plugins.
 If you set up your plugin like this,
 
-  package DBIx::MoCo::Column::MyColumn;
+  package DBIx::MoCo::Column::URI;
 
-  sub MyColumn {
+  sub URI {
     my $self = shift;
-    return "My Column $$self";
+    return URI->new($$self);
+  }
+
+  sub URI_as_string {
+    my $class = shift;
+    my $uri = shift or return;
+    return $uri->as_string;
   }
 
   1;
 
-Then, you can use column_as_MyColumn method
+Then, you can use column_as_MyColumn method as following,
 
-  my $o = MyObject->retrieve(..);
-  print $o->name; # "jkondo"
-  print $o->name_as_MyColumn; # "My Column jkondo";
+  my $e = MyEntry->retrieve(..);
+  print $e->uri; # 'http://test.com/test'
+  print $e->uri_as_URI->host; # 'test.com';
 
-You can also inflate your column value with blessing with other classes.
-Method name which will be imported must be same as the package name.
+  my $uri = URI->new('http://www.test.com/test');
+  $e->uri_as_URI($uri); # set uri by using URI instance
+
+The name of infrate method which will be imported must be same as the package name.
+
+If you don't define "as string" method (such as URI_as_string), 
+scalar evaluated value of given argument will be used for new value instead.
 
 =head1 SEE ALSO
 
-L<DBIx::MoCo>
+L<DBIx::MoCo>, L<DBIx::MoCo::Column::URI>
 
 =head1 AUTHOR
 

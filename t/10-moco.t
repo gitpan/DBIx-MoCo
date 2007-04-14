@@ -191,8 +191,9 @@ sub retrieve_has_a : Test(5) {
 }
 
 sub count : Tests {
-    is (Blog::User->count(name => 'jkondo'), 1);
     is (Blog::User->count({name => 'jkondo'}), 1);
+    is (Blog::User->count(['name = ?', 'jkondo']), 1);
+    is (Blog::User->count("name = 'jkondo'"), 1);
     my $all = Blog::User->count + 0;
     ok ($all > 1);
     is (Blog::User->count, $all);

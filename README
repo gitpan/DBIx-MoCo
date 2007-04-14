@@ -230,8 +230,53 @@ CLASS METHODS
     retrieve_all_id_hash
     create
     delete_all
-    count
     search
+        You can specify search condition in 3 diferrent ways. "Hash
+        reference style", "Array reference style" and "Scalar style".
+
+        Hash reference style is same as SQL::Abstract style and like this.
+
+          Blog::User->search(where => {name => 'jkondo'});
+
+        Array style is the most flexible. You can use placeholder.
+
+          Blog::User->search(
+            where => ['name = ?', 'jkondo'],
+          );
+          Blog::User->search(
+            where => ['name in (?,?)', 'jkondo', 'cinnamon'],
+          );
+          Blog::Entry->search(
+            where => ['name = :name and date like :date'],
+                     name => 'jkondo', date => '2007-04%'],
+          );
+
+        Scalar style is the simplest one, and most flexible in other word.
+
+          Blog::Entry->search(
+            where => "name = 'jkondo' and DATE_ADD(date, INTERVAL 1 DAY) > NOW()',
+          );
+
+        You can also specify "field", "order", "offset", "limit", "group"
+        too. Full spec search statement will be like the following.
+
+          Blog::Entry->search(
+            field => 'entry_id',
+            where => ['name = ?', 'jkondo'],
+            order => 'created desc',
+            offset => 0,
+            limit => 1,
+            group => 'title',
+          );
+
+    count
+        Returns the count of results matched with given condition. You can
+        specify the condition in same way as "search"'s where spec.
+
+          Blog::User->count({name => 'jkondo'}); # Hash reference style
+          Blog::User->count(['name => ?', 'jkondo']); # Array reference style
+          Blog::User->count("name => 'jkondo'"); # Scalar style
+
     find
         Similar to search, but returns only the first item as a reference
         (not array).
@@ -243,24 +288,36 @@ CLASS METHODS
         Inflate column value by using DBIx::MoCo::Column::* plugins. If you
         set up your plugin like this,
 
-          package DBIx::MoCo::Column::MyColumn;
+          package DBIx::MoCo::Column::URI;
 
-          sub MyColumn {
+          sub URI {
             my $self = shift;
-            return "My Column $$self";
+            return URI->new($$self);
+          }
+
+          sub URI_as_string {
+            my $class = shift;
+            my $uri = shift or return;
+            return $uri->as_string;
           }
 
           1;
 
-        Then, you can use column_as_MyColumn method
+        Then, you can use column_as_URI method as following,
 
-          my $o = MyObject->retrieve(..);
-          print $o->name; # "jkondo"
-          print $o->name_as_MyColumn; # "My Column jkondo";
+          my $e = MyEntry->retrieve(..);
+          print $e->uri; # 'http://test.com/test'
+          print $e->uri_as_URI->host; # 'test.com';
 
-        You can also inflate your column value with blessing with other
-        classes. Method name which will be imported must be same as the
-        package name.
+          my $uri = URI->new('http://www.test.com/test');
+          $e->uri_as_URI($uri); # set uri by using URI instance
+
+        The name of infrate method which will be imported must be same as
+        the package name.
+
+        If you don't define "as string" method (such as "URI_as_string"),
+        scalar evaluated value of given argument will be used for new value
+        instead.
 
     has_a, has_many auto generated methods
         If you define has_a, has_many relationships,
