@@ -2,6 +2,8 @@ package Blog::User;
 use strict;
 use warnings;
 use base qw 'Blog::Class';
+use Blog::Entry;
+use Blog::Bookmark;
 
 __PACKAGE__->table('user');
 __PACKAGE__->has_many(

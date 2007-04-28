@@ -1,5 +1,13 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.13 Fri Apr 27 2007
+        - Added MoCo::Relation
+	- Added replication features
+	- Fixed AUTOLOAD and can problem
+	- Refactored cache, session, relation methods.
+	- Rewrote and sorted out pod documents.
+	- Fixed has_a_handler problem when retrieving null result
+
 0.12 Fri Apr 13 2007
 	- Added deflate function to DBIx::MoCo::Column handler
 	- Chaned count interface using search condition

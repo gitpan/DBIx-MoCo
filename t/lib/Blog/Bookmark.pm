@@ -2,6 +2,8 @@ package Blog::Bookmark;
 use strict;
 use warnings;
 use base qw 'Blog::Class';
+use Blog::User;
+use Blog::Entry;
 
 __PACKAGE__->table('bookmark');
 __PACKAGE__->has_a(

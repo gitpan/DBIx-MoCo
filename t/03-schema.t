@@ -36,6 +36,11 @@ sub unique_keys : Tests {
 sub columns : Tests {
     my $cols = Blog::User->columns or return;
     ok $cols;
+    isa_ok ($cols, 'ARRAY', 'cols is a array');
+    my %cols;
+    $cols{$_}++ for @$cols;
+    ok ($cols{name}, 'cols has name');
+    ok ($cols{user_id}, 'cols has user_id');
     is_deeply [sort @$cols], ['name', 'user_id'], 'user columns';
 }
 

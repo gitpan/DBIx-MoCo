@@ -67,7 +67,7 @@ SYNOPSIS
 
       1;
 
-      # Now, You can use some methods same as in Class::DBI.
+      # Now, You can use some methods same as Class::DBI.
       # And, all objects are stored in cache automatically.
       my $user = Blog::User->retrieve(user_id => 123);
       print $user->name;
@@ -141,8 +141,8 @@ CACHE ALGORITHM
     _before_delete
         Calls "flush_self_cache" and "flush_belongs_to".
 
-CLASS METHODS
-    Here are common class methods of DBIx::MoCo.
+CLASS DEFINISION METHODS
+    Here are common methods related with class definisions.
 
     add_trigger
         Adds triggers. Here are the types which called from DBIx::MoCo.
@@ -184,15 +184,15 @@ CLASS METHODS
           );
 
         "condition" is additional sql statement will be used in where
-        condition. "order" is used for specifying order statement. In above
-        case, SQL statement will be ..
+        statement. "order" is used for specifying order statement. In above
+        case, SQL statement will be
 
           SELECT message_id FROM message
           WHERE to_name = 'myname' AND reference_id is null
           ORDER BY modified desc
 
         And, all each results will be inflated as Blog::Message by
-        retrieving (with using cache) all records again.
+        retrieving all records again (with using cache).
 
     retrieve_keys
         Defines keys for retrieving by retrieve_all etc. If there aren't any
@@ -203,35 +203,100 @@ CLASS METHODS
           __PACKAGE__->retrieve_keys(['user_id', 'entry_id']);
           # When user can add multiple bookmarks onto same entry.
 
-    start_session
-    end_session
-    is_in_session
-    cache_status
-        Returns cache status hash reference. cache_status provides
-        retrieve_count, retrieve_cache_count, retrieved_oids
-        retrieve_all_count, has_many_count, has_many_cache_count,
+    primary_keys
+        Returns primary keys. Usually it returns them automatically by
+        retrieving schema data from database. But you can also redefine this
+        parameter by overriding this method. It's useful when MoCo cannot
+        get schema data from your dsn.
 
-    cache
-        Set or get cache.
+          sub primary_keys {['user_id']}
+
+    unique_keys
+        Returns unique keys including primary keys. You can override this as
+        same as "primary_keys".
+
+          sub unique_keys {['user_id','name']}
 
     schema
         Returns DBIx::MoCo::Schema object reference related with your model
-        class.
+        class. You can set/get any parameters using Schema's "param" method.
+        See DBIx::MoCo::Schema for details.
 
-    primary_keys
-    unique_keys
     columns
+        Returns array reference of column names.
+
     has_column(col_name)
         Returns which the table has the column or not.
 
+SESSION & CACHE METHODS
+    Here are common methods related with session.
+
+    start_session
+        Starts session.
+
+    end_session
+        Ends session.
+
+    is_in_session
+        Returns DBIx::MoCo is in session or not.
+
+    cache_status
+        Returns cache status of the current session as a hash reference.
+        cache_status provides retrieve_count, retrieve_cache_count,
+        retrieved_oids retrieve_all_count, has_many_count,
+        has_many_cache_count,
+
+    flush
+        Delete attribute from given attr. name.
+
+    save
+        Saves changed columns in the current session.
+
+DATA OPERATIONAL METHODS
+    Here are common methods related with operating data.
+
     retrieve
-    retrieve_or_create
+        Retrieves an object and returns that using cache (if possible).
+
+          my $u1 = Blog::User->retrieve(123); # retrieve by primary_key
+          my $u2 = Blog::User->retrieve(user_id => 123); # same as above
+          my $u3 = Blog::User->retrieve(name => 'jkondo'); # retrieve by name
+
     retrieve_all
-    retrieve_all_id_hash
+        Returns results of given conditions as "DBIx::MoCo::List" instance.
+
+          my $users = Blog::User->retrieve_all(birthday => '2001-07-15');
+
+    retrieve_or_create
+        Retrieves a object or creates new record with given data and returns
+        that.
+
+          my $user = Blog::User->retrieve_or_create(name => 'jkondo');
+
     create
+        Creates new object and returns that.
+
+          my $user = Blog::User->create(
+            name => 'jkondo',
+            birthday => '2001-07-15',
+          );
+
+    delete
+        Deletes a object. You can call "delete" as both of class and
+        instance method.
+
+          $user->delte;
+          Blog::User->delete($user);
+
     delete_all
+        Deletes all records with given conditions. You should specify the
+        conditions as a hash reference.
+
+          Blog::User->delete_all({birthday => '2001-07-15'});
+
     search
-        You can specify search condition in 3 diferrent ways. "Hash
+        Returns results of given conditions as "DBIx::MoCo::List" instance.
+        You can specify search conditions in 3 diferrent ways. "Hash
         reference style", "Array reference style" and "Scalar style".
 
         Hash reference style is same as SQL::Abstract style and like this.
@@ -269,9 +334,14 @@ CLASS METHODS
             group => 'title',
           );
 
+        Search results will not be cached because MoCo expects that the
+        conditions for "search" will be complicated and should not be
+        cached. You should use "retrieve" or "retrieve_all" method instead
+        of "search" if you'll use simple conditions.
+
     count
-        Returns the count of results matched with given condition. You can
-        specify the condition in same way as "search"'s where spec.
+        Returns the count of results matched with given conditions. You can
+        specify the conditions in same way as "search"'s where spec.
 
           Blog::User->count({name => 'jkondo'}); # Hash reference style
           Blog::User->count(['name => ?', 'jkondo']); # Array reference style
@@ -279,11 +349,29 @@ CLASS METHODS
 
     find
         Similar to search, but returns only the first item as a reference
-        (not array).
+        (not as an array).
 
     retrieve_by_column(_and_column2)
+        Auto generated method which returns an object by using key defined
+        is method and given value.
+
+          my $user = Blog::User->retrieve_by_name('jkondo');
+
     retrieve_by_column(_and_column2)_or_create
+        Similar to retrieve_or_create.
+
+          my $user = Blog::User->retrieve_by_name_or_create('jkondo');
+
     retrieve_by_column_or_column2
+        Returns an object matched with given column names.
+
+          my $user = Blog::User->retrieve_by_user_id_or_name('jkondo');
+
+    param
+        Set or get attribute from given attr. name.
+
+    set Set attribute which is not related with DB schema or set temporary.
+
     column_as_something
         Inflate column value by using DBIx::MoCo::Column::* plugins. If you
         set up your plugin like this,
@@ -341,36 +429,8 @@ CLASS METHODS
           print $e->user; # isa Blog::User
           print $e->bookmarks; # isa ARRAY of Blog::Bookmark
 
-CLASS OR INSTANCE METHODS
-    Here are common class or instance methods of DBIx::MoCo.
-
-    object_id
-    delete
     quote
-
-INSTANCE METHODS
-    Here are common instance methods of DBIx::MoCo.
-
-    flush_self_cache
-        Flush caches for self possible object ids.
-
-    store_self_cache
-        Store self into cache for possible object ids.
-
-    flush
-        Delete attribute from given attr. name.
-
-    param
-        Set or get attribute from given attr. name.
-
-    set Set attribute which is not related with DB schema or set temporary.
-
-    has_primary_keys
-    save
-        Saves changed columns in session.
-
-    object_ids
-        Returns all possible object-ids.
+        Quotes given string using DBI's quote method.
 
 FORM VALIDATION
     You can validate user parameters using moco's schema. For example you
@@ -395,7 +455,7 @@ FORM VALIDATION
       }
 
 SEE ALSO
-    SQL::Abstract, Class::DBI, Cache,
+    DBIx::MoCo::DataBase, SQL::Abstract, Class::DBI, Cache,
 
 AUTHOR
     Junya Kondo, <http://jkondo.vox.com/>, Naoya Ito, <naoya@hatena.ne.jp>

@@ -6,7 +6,7 @@ use base qw (Class::Data::Inheritable);
 use DBI;
 use SQL::Abstract;
 
-__PACKAGE__->mk_classdata($_) for qw(dsn username password
+__PACKAGE__->mk_classdata($_) for qw(username password
                                      cache_connection last_insert_id);
 __PACKAGE__->cache_connection(1);
 
@@ -120,12 +120,48 @@ sub _parse_limit {
     return $sql;
 }
 
+sub dsn {
+    my $class = shift;
+    my ($master_dsn, $slave_dsn);
+    if ($_[1]) {
+        my %args = @_;
+        my $master = $args{master} or croak "master dsn is not specified";
+        $master_dsn = ref($master) eq 'ARRAY' ? $master : [$master];
+        my $slave = $args{slave} || $master;
+        $slave_dsn = ref($slave) eq 'ARRAY' ? $slave : [$slave];
+    } elsif ($_[0]) {
+        $slave_dsn = $master_dsn = ref($_[0]) eq 'ARRAY' ? $_[0] : [$_[0]];
+    } else {
+        croak "Please specify your dsn.";
+    }
+#     $dsn->{$class} = {
+#         master => $master_dsn,
+#         slave => $slave_dsn,
+#     };
+    my $getter = $class . '::get_dsn';
+    {
+        no strict 'refs';
+        no warnings 'redefine';
+        *{$getter} = sub {
+            my $class = shift;
+            my $sql = shift;
+            my $list = $master_dsn;
+            if ($sql && $sql =~ /^SELECT/io) { $list = $slave_dsn }
+            my $dsn = shift @$list;
+            push @$list, $dsn;
+            return $dsn;
+        }
+    }
+}
+
+sub get_dsn { croak "You must set up your dsn first." }
+
 sub dbh {
     my $class = shift;
+    my $sql = shift;
     my $connect = $class->cache_connection ? 'connect_cached' : 'connect';
-    DBI->$connect(
-        $class->dsn, $class->username, $class->password
-    );
+    my $dsn = $class->get_dsn($sql);
+    DBI->$connect($dsn, $class->username, $class->password);
 }
 
 sub execute {
@@ -133,7 +169,7 @@ sub execute {
     my ($sql, $data, $binds) = @_;
     $sql or return;
     my @bind_values = ref $binds eq 'ARRAY' ? @$binds : ();
-    my $dbh = $class->dbh;
+    my $dbh = $class->dbh(substr($sql,0,8));
     my $sth = @bind_values ? $dbh->prepare_cached($sql,undef,1) :
         $dbh->prepare($sql);
     unless ($sth) { carp $dbh->errstr and return; }
@@ -194,11 +230,15 @@ sub unique_keys {
 sub columns {
     my $class = shift;
     my $table = shift or return;
-    my $sth = $class->dbh->column_info(undef,undef,$table,'%') or return;
-    return [
-        map {$_->{COLUMN_NAME}}
-        @{$sth->fetchall_arrayref({})}
-    ];
+    if (my $sth = $class->dbh->column_info(undef,undef,$table,'%')) {
+        return [
+            map {$_->{COLUMN_NAME}}
+            @{$sth->fetchall_arrayref({})}
+        ];
+    } else {
+        my $d = $class->select($table,'*',undef,'',{limit => 1}) or return;
+        return [keys %{$d->[0]}];
+    }
 }
 
 1;
@@ -221,7 +261,15 @@ DBIx::MoCo::DataBase - Data Base Handler for DBIx::MoCo
   # In your scripts
   MyDataBase->execute('select 1');
 
+  # Configure your replication databases
+  __PACKAGE__->dsn(
+    master => 'dbi:mysql:dbname=test;host=db1',
+    slave => ['dbi:mysql:dbname=test;host=db2','dbi:mysql:dbname=test;host=db3'],
+  );
+
 =head1 METHODS
+
+=over 4
 
 =item cache_connection
 
@@ -230,6 +278,26 @@ If its set to 0, DBIx::MoCo::DataBase uses DBI->connect instead of
 DBI->connect_cached.
 
   DBIx::MoCo::DataBase->cache_connection(0);
+
+=item dsn
+
+Configures dsn(s). You can specify single dsn as string, multiple dsns as an array,
+master/slave dsns as hash.
+
+If you specify multiple dsns, they will be rotated automatically in round-robin.
+MoCo will use slave dsns when the sql begins with C<SELECT> if you set up slave(s).
+
+  MyDataBase->dsn('dbi:mysql:dbname=test');
+  MyDataBase->dsn(['dbi:mysql:dbname=test;host=db1','dbi:mysql:dbname=test;host=db2']);
+  MyDataBase->dsn(
+     master => ['dbi:mysql:dbname=test;host=db1','dbi:mysql:dbname=test;host=db2'],
+  );
+  MyDataBase->dsn(
+    master => 'dbi:mysql:dbname=test;host=db1',
+    slave => ['dbi:mysql:dbname=test;host=db2','dbi:mysql:dbname=test;host=db3'],
+  );
+
+=back
 
 =head1 SEE ALSO
 

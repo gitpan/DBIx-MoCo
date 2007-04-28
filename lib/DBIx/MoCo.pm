@@ -2,6 +2,7 @@ package DBIx::MoCo;
 use strict;
 use warnings;
 use base qw (Class::Data::Inheritable);
+use DBIx::MoCo::Relation;
 use DBIx::MoCo::List;
 use DBIx::MoCo::Cache;
 use DBIx::MoCo::Schema;
@@ -11,9 +12,10 @@ use Class::Trigger;
 use UNIVERSAL::require;
 use Scalar::Util qw(weaken);
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 our $AUTOLOAD;
-our $cache_status = {
+
+my $cache_status = {
     retrieve_count => 0,
     retrieve_cache_count => 0,
     retrieve_all_count => 0,
@@ -21,23 +23,75 @@ our $cache_status = {
     has_many_cache_count => 0,
     retrieved_oids => [],
 };
-# $cache_status provides ..
-#  retrieve_count, retrieve_cache_count, retrieved_oids
-#  retrieve_all_count, has_many_count, has_many_cache_count,
+my ($cache,$db,$session);
 
 __PACKAGE__->mk_classdata($_) for qw(cache_object db_object table
                                      retrieve_keys _schema);
-
-__PACKAGE__->add_trigger(after_create => \&_after_create);
-__PACKAGE__->add_trigger(before_update => \&_before_update);
-__PACKAGE__->add_trigger(after_update => \&_after_update);
-__PACKAGE__->add_trigger(before_delete => \&_before_delete);
-
 __PACKAGE__->cache_object('DBIx::MoCo::Cache');
 
-my ($cache,$db,$session);
+# SESSION & CACHE CONTROLLERS
+__PACKAGE__->add_trigger(after_create => sub {
+    my ($class, $self) = @_;
+    $self or confess '$self is not specified';
+    $class->store_self_cache($self);
+    $class->flush_belongs_to($self);
+});
+__PACKAGE__->add_trigger(before_update => sub {
+    my ($class, $self) = @_;
+    $self or confess '$self is not specified';
+    $class->flush_self_cache($self);
+});
+__PACKAGE__->add_trigger(after_update => sub {
+    my ($class, $self) = @_;
+    $self or confess '$self is not specified';
+    $class->store_self_cache($self);
+});
+__PACKAGE__->add_trigger(before_delete => sub {
+    my ($class, $self) = @_;
+    $self or confess '$self is not specified';
+    $class->flush_self_cache($self);
+    $class->flush_belongs_to($self);
+});
 
-# Session
+sub cache_status { $cache_status }
+
+sub cache {
+    my $class = shift;
+    $class = ref($class) if ref($class);
+    my ($k,$v) = @_;
+    $cache ||= $class->cache_object->new;
+    $cache->set($k => $v) if defined $v;
+    return $cache->get($k);
+}
+
+sub flush_belongs_to {} # it's delivered from MoCo::Relation
+
+sub flush_self_cache {
+    my ($class, $self) = @_;
+    if (!$self && ref $class) {
+        $self = $class;
+        $class = ref $self;
+    }
+    $self or confess '$self is not specified';
+    for (@{$self->object_ids}) {
+        # warn "flush $_";
+        weaken($class->cache($_));
+        $cache->remove($_);
+    }
+}
+
+sub store_self_cache {
+    my ($class, $self) = @_;
+    if (!$self && ref $class) {
+        $self = $class;
+        $class = ref $self;
+    }
+    $self or confess '$self is not specified';
+    # warn "store $_" for @{$self->object_ids};
+    $class->cache($_, $self) for @{$self->object_ids};
+}
+
+# session controllers
 sub start_session {
     my $class = shift;
     $class->end_session if $class->is_in_session;
@@ -65,106 +119,16 @@ sub save_changed {
     $_->save for @{$class->session->{changed_objects}};
 }
 
-sub _after_create {
-    my ($class, $self) = @_;
-    $self or return;
-    $self->store_self_cache;
-    $class->flush_belongs_to($self);
-}
-
-sub _before_update {
-    my ($class, $self) = @_;
-    $self or return;
-    $self->flush_self_cache;
-}
-
-sub _after_update {
-    my ($class, $self) = @_;
-    $self or return;
-    $self->store_self_cache;
-}
-
-sub _before_delete {
-    my ($class, $self) = @_;
-    $self or return;
-    #warn 'delete '.$self->object_id;
-    $self->flush_self_cache;
-    $class->flush_belongs_to($self);
-}
-
-# Cache
-sub cache_status { $cache_status };
-
-sub flush_belongs_to {
-    my ($class, $self) = @_;
-    $self or return;
-    for my $attr (keys %{$class->has_a}) {
-        my $ha = $class->has_a->{$attr};
-        unless (defined $ha->{other_attrs}) {
-            my $oa = [];
-            for my $oattr (keys %{$ha->{class}->has_many}) {
-                my $hm = $ha->{class}->has_many->{$oattr};
-                if ($hm->{class} eq $class) {
-                    push @$oa, $oattr;
-                }
-            }
-            $ha->{other_attrs} = $oa;
-            #warn join(' / ', %$ha);
-        }
-        for my $oattr (@{$ha->{other_attrs}}) {
-            #warn "call $self->$attr->flush($oattr)";
-            my $parent = $self->$attr() or next;
-            $parent->flush($oattr);
-        }
-    }
-}
-
-sub cache {
+# CLASS DEFINISION METHODS
+sub relation { 'DBIx::MoCo::Relation' }
+sub has_a {
     my $class = shift;
-    $class = ref($class) if ref($class);
-    my ($k,$v) = @_;
-    $cache ||= $class->cache_object->new;
-    $cache->set($k => $v) if defined $v;
-    return $cache->get($k);
+    $class->relation->register($class, 'has_a', @_);
 }
-
-sub flush_self_cache {
-    my $self = shift;
-    my $class = ref $self or return;
-    for (@{$self->object_ids}) {
-        # warn "flush $_";
-        weaken($class->cache($_));
-        $cache->remove($_);
-    }
-}
-
-sub store_self_cache {
-    my $self = shift;
-    my $class = ref $self or return;
-    # warn "store $_" for @{$self->object_ids};
-    $class->cache($_, $self) for @{$self->object_ids};
-}
-
-# Relations
-sub _relationship {
+sub has_many {
     my $class = shift;
-    my ($reltype, $attr, $model, $option) = @_;
-    my $vname = $class . '::' . $reltype;
-    no strict 'refs';
-    $$vname ||= {};
-    if ($attr && $model) {
-        $$vname->{$attr} = {
-            class => $model,
-            option => $option || {},
-        };
-    }
-    return $$vname;
+    $class->relation->register($class, 'has_many', @_);
 }
-
-sub has_a { shift->_relationship('has_a', @_) }
-sub has_many { shift->_relationship('has_many', @_) }
-
-# schema
 sub schema {
     my $class = shift;
     unless ($class->_schema) {
@@ -173,20 +137,9 @@ sub schema {
     return $class->_schema;
 }
 
-sub primary_keys {
-    my $class = shift;
-    $class->schema->primary_keys;
-}
-
-sub unique_keys {
-    my $class = shift;
-    $class->schema->unique_keys;
-}
-
-sub columns {
-    my $class = shift;
-    $class->schema->columns;
-}
+sub primary_keys { $_[0]->schema->primary_keys }
+sub unique_keys { $_[0]->schema->unique_keys }
+sub columns { $_[0]->schema->columns }
 
 sub has_column {
     my $class = shift;
@@ -195,7 +148,7 @@ sub has_column {
     grep { $col eq $_ } @{$class->columns};
 }
 
-# oid, db, create, retrieve..
+# DATA OPERATIONAL METHODS
 sub object_id {
     my $self = shift;
     my $class = ref($self) || $self;
@@ -222,10 +175,7 @@ sub object_id {
     return $key;
 }
 
-sub db {
-    my $class = shift;
-    $class->db_object;
-}
+sub db { $_[0]->db_object }
 
 sub retrieve {
     my $cs = $cache_status;
@@ -244,7 +194,7 @@ sub retrieve {
         my $h = $res->[0];
         my $o = $h ? $class->new(%$h) : '';
         if ($o) {
-            $o->store_self_cache;
+            $class->store_self_cache($o);
         } else {
             # $class->cache($oid => $o) if $o;
             $class->cache($oid => $o); # cache null object for performance.
@@ -276,11 +226,6 @@ sub retrieve_all {
 sub retrieve_all_id_hash {
     my $class = shift;
     my %args = @_;
-#     ref $args{where} eq 'HASH' or die 'please specify where in hash';
-#     my $res = $class->db->select($class->table,
-#                                  $class->retrieve_keys || $class->primary_keys,
-#                                  $args{where},$args{order},\%args);
-#     return $res;
     $args{table} = $class->table;
     $args{field} = join(',', @{$class->retrieve_keys || $class->primary_keys});
     my $res = $class->db->search(%args);
@@ -374,16 +319,6 @@ sub quote {
     $class->db->dbh->quote(shift);
 }
 
-# new
-sub new {
-    my $class = shift;
-    my %args = @_;
-    my $self = \%args;
-    $self->{changed_cols} = {};
-    bless $self, $class;
-}
-
-# AUTOLOAD
 sub AUTOLOAD {
     my $self = $_[0];
     my $class = ref($self) || $self;
@@ -398,17 +333,31 @@ sub AUTOLOAD {
     } elsif ($method =~ /^(\w+)_as_(\w+)$/o) {
         my ($col,$as) = ($1,$2);
         *$AUTOLOAD = $class->_column_as_handler($col, $as);
-    } elsif ($class->has_a->{$method}) {
-        *$AUTOLOAD = $class->_has_a_handler($method);
-    } elsif ($class->has_many->{$method}) {
-        *$AUTOLOAD = $class->_has_many_handler($method);
-    } elsif ($class->has_column($method)) {
+    } elsif (defined $self->{$method} || $class->has_column($method)) {
         *$AUTOLOAD = sub { shift->param($method, @_) };
     } else {
-        *$AUTOLOAD = sub { shift->param($method, @_) };
-        # die "undefined method $method";
+        croak "undefined method $method";
     }
     goto &$AUTOLOAD;
+}
+
+{
+    my $real_can = \&UNIVERSAL::can;
+    no warnings 'redefine', 'once';
+    *DBIx::MoCo::can = sub {
+        my ($class, $method) = @_;
+        if (my $sub = $real_can->(@_)) {
+            # warn "found $method in $class";
+            return $sub;
+        }
+        no strict 'refs';
+        if (my $auto = *{$class . '::AUTOLOAD'}{CODE}) {
+            return $auto;
+        }
+        $AUTOLOAD = $class . '::' . $method;
+        eval {&DBIx::MoCo::AUTOLOAD(@_)} unless *$AUTOLOAD{CODE};
+        return *$AUTOLOAD{CODE};
+    };
 }
 
 sub _column_as_handler {
@@ -441,78 +390,6 @@ sub column {
     my $col = shift or return;
     my $v = $self->{$col} or return;
     return DBIx::MoCo::Column->new($v);
-}
-
-sub _has_a_handler {
-    my $class = shift;
-    my $method = shift;
-    my $rel = $class->has_a->{$method} or return;
-    return sub {
-        my $self = shift;
-        unless (defined $self->{$method}) {
-            my $key = $rel->{option}->{key} or return;
-            my $v;
-            # warn "$class -> $method" , %$rel;
-            if (ref($key) eq 'HASH') {
-                my $mykey;
-                ($mykey, $key) = %$key;
-                $v = $self->{$mykey};
-            } else {
-                $v = $self->{$key};
-            }
-            $self->{$method} = $rel->{class}->retrieve($key => $v);
-        }
-        return $self->{$method};
-    }
-}
-
-sub _has_many_handler {
-    my $class = shift;
-    my $method = shift;
-    my $rel = $class->has_many->{$method} or return;
-    return sub {
-        my $cs = $cache_status;
-        $cs->{has_many_count}++;
-        my $self = shift;
-        my $off = shift || 0;
-        my $lt = shift;
-        my $max_off = $lt ? $off + $lt : -1;
-        my $max_key = $method . '_max_offset';
-        if (defined $self->{$method} && (
-            $self->{$max_key} == -1 ||
-                (0 <= $max_off && $max_off <= $self->{$max_key}) )) {
-            #warn "$method cache($self->{$max_key}) is in range $max_off";
-            $cs->{has_many_cache_count}++;
-        } else {
-            my $key = $rel->{option}->{key} or return;
-            my ($where, $v);
-            if (ref $key eq 'HASH') {
-                my ($k1, $k2) = %$key;
-                $where = "$k2 = ?";
-                $v = $self->{$k1} or return;
-            } else {
-                $where = "$key = ?";
-                $v = $self->{$key} or return;
-            }
-            if ($rel->{option}->{condition}) {
-                $where .= ' and ' . $rel->{option}->{condition};
-            }
-            $self->{$method} = $rel->{class}->retrieve_all(
-                where => [$where, $v],
-                order => $rel->{option} ? $rel->{option}->{order} || '' : '',
-                group => $rel->{option} ? $rel->{option}->{group} || '' : '',
-                limit => $max_off > 0 ? $max_off : '',
-            );
-            $self->{$max_key} = $max_off;
-        }
-        if (defined $off && $lt) {
-            return DBIx::MoCo::List->new(
-                [@{$self->{$method}}[$off .. $max_off - 1]],
-            )->compact;
-        } else {
-            return $self->{$method};
-        }
-    }
 }
 
 sub _retrieve_by_handler {
@@ -556,7 +433,14 @@ sub DESTROY {
     $class->save_changed;
 }
 
-# Instance methods
+sub new {
+    my $class = shift;
+    my %args = @_;
+    my $self = \%args;
+    $self->{changed_cols} = {};
+    bless $self, $class;
+}
+
 sub flush {
     my $self = shift;
     my $attr = shift or return;
@@ -714,7 +598,7 @@ DBIx::MoCo - Light & Fast Model Component
 
   1;
 
-  # Now, You can use some methods same as in Class::DBI.
+  # Now, You can use some methods same as Class::DBI.
   # And, all objects are stored in cache automatically.
   my $user = Blog::User->retrieve(user_id => 123);
   print $user->name;
@@ -805,9 +689,9 @@ Calls C<flush_self_cache> and C<flush_belongs_to>.
 
 =back
 
-=head1 CLASS METHODS
+=head1 CLASS DEFINISION METHODS
 
-Here are common class methods of DBIx::MoCo.
+Here are common methods related with class definisions.
 
 =over 4
 
@@ -853,16 +737,16 @@ You can define additional conditions as below.
     },
   );
 
-C<condition> is additional sql statement will be used in where condition.
+C<condition> is additional sql statement will be used in where statement.
 C<order> is used for specifying order statement.
-In above case, SQL statement will be ..
+In above case, SQL statement will be
 
   SELECT message_id FROM message
   WHERE to_name = 'myname' AND reference_id is null
   ORDER BY modified desc
 
 And, all each results will be inflated as Blog::Message by retrieving
-(with using cache) all records again.
+all records again (with using cache).
 
 =item retrieve_keys
 
@@ -874,51 +758,124 @@ If there aren't any unique keys in your table, please specify these keys.
   __PACKAGE__->retrieve_keys(['user_id', 'entry_id']);
   # When user can add multiple bookmarks onto same entry.
 
-=item start_session
+=item primary_keys
 
-=item end_session
+Returns primary keys. Usually it returns them automatically by retrieving
+schema data from database.
+But you can also redefine this parameter by overriding this method.
+It's useful when MoCo cannot get schema data from your dsn.
 
-=item is_in_session
+  sub primary_keys {['user_id']}
 
-=item cache_status
+=item unique_keys
 
-Returns cache status hash reference.
-cache_status provides retrieve_count, retrieve_cache_count, retrieved_oids
-retrieve_all_count, has_many_count, has_many_cache_count,
+Returns unique keys including primary keys. You can override this as same as C<primary_keys>.
 
-=item cache
-
-Set or get cache.
+  sub unique_keys {['user_id','name']}
 
 =item schema
 
 Returns DBIx::MoCo::Schema object reference related with your model class.
-
-=item primary_keys
-
-=item unique_keys
+You can set/get any parameters using Schema's C<param> method.
+See L<DBIx::MoCo::Schema> for details.
 
 =item columns
+
+Returns array reference of column names.
 
 =item has_column(col_name)
 
 Returns which the table has the column or not.
 
+=back
+
+=head1 SESSION & CACHE METHODS
+
+Here are common methods related with session.
+
+=over 4
+
+=item start_session
+
+Starts session.
+
+=item end_session
+
+Ends session.
+
+=item is_in_session
+
+Returns DBIx::MoCo is in session or not.
+
+=item cache_status
+
+Returns cache status of the current session as a hash reference.
+cache_status provides retrieve_count, retrieve_cache_count, retrieved_oids
+retrieve_all_count, has_many_count, has_many_cache_count,
+
+=item flush
+
+Delete attribute from given attr. name.
+
+=item save
+
+Saves changed columns in the current session.
+
+=back
+
+=head1 DATA OPERATIONAL METHODS
+
+Here are common methods related with operating data.
+
+=over 4
+
 =item retrieve
 
-=item retrieve_or_create
+Retrieves an object and returns that using cache (if possible).
+
+  my $u1 = Blog::User->retrieve(123); # retrieve by primary_key
+  my $u2 = Blog::User->retrieve(user_id => 123); # same as above
+  my $u3 = Blog::User->retrieve(name => 'jkondo'); # retrieve by name
 
 =item retrieve_all
 
-=item retrieve_all_id_hash
+Returns results of given conditions as C<DBIx::MoCo::List> instance.
+
+  my $users = Blog::User->retrieve_all(birthday => '2001-07-15');
+
+=item retrieve_or_create
+
+Retrieves a object or creates new record with given data and returns that.
+
+  my $user = Blog::User->retrieve_or_create(name => 'jkondo');
 
 =item create
 
+Creates new object and returns that.
+
+  my $user = Blog::User->create(
+    name => 'jkondo',
+    birthday => '2001-07-15',
+  );
+
+=item delete
+
+Deletes a object. You can call C<delete> as both of class and instance method.
+
+  $user->delte;
+  Blog::User->delete($user);
+
 =item delete_all
+
+Deletes all records with given conditions. You should specify the conditions
+as a hash reference.
+
+  Blog::User->delete_all({birthday => '2001-07-15'});
 
 =item search
 
-You can specify search condition in 3 diferrent ways. "Hash reference style",
+Returns results of given conditions as C<DBIx::MoCo::List> instance.
+You can specify search conditions in 3 diferrent ways. "Hash reference style",
 "Array reference style" and "Scalar style".
 
 Hash reference style is same as SQL::Abstract style and like this.
@@ -956,10 +913,15 @@ Full spec search statement will be like the following.
     group => 'title',
   );
 
+Search results will not be cached because MoCo expects that the conditions
+for C<search> will be complicated and should not be cached.
+You should use C<retrieve> or C<retrieve_all> method instead of C<search>
+if you'll use simple conditions.
+
 =item count
 
-Returns the count of results matched with given condition. You can specify
-the condition in same way as C<search>'s where spec.
+Returns the count of results matched with given conditions. You can specify
+the conditions in same way as C<search>'s where spec.
 
   Blog::User->count({name => 'jkondo'}); # Hash reference style
   Blog::User->count(['name => ?', 'jkondo']); # Array reference style
@@ -967,13 +929,33 @@ the condition in same way as C<search>'s where spec.
 
 =item find
 
-Similar to search, but returns only the first item as a reference (not array).
+Similar to search, but returns only the first item as a reference (not as an array).
 
 =item retrieve_by_column(_and_column2)
 
+Auto generated method which returns an object by using key defined is method and given value.
+
+  my $user = Blog::User->retrieve_by_name('jkondo');
+
 =item retrieve_by_column(_and_column2)_or_create
 
+Similar to retrieve_or_create.
+
+  my $user = Blog::User->retrieve_by_name_or_create('jkondo');
+
 =item retrieve_by_column_or_column2
+
+Returns an object matched with given column names.
+
+  my $user = Blog::User->retrieve_by_user_id_or_name('jkondo');
+
+=item param
+
+Set or get attribute from given attr. name.
+
+=item set
+
+Set attribute which is not related with DB schema or set temporary.
 
 =item column_as_something
 
@@ -1032,57 +1014,9 @@ You can use those keys as methods.
   print $e->user; # isa Blog::User
   print $e->bookmarks; # isa ARRAY of Blog::Bookmark
 
-=back
-
-=head1 CLASS OR INSTANCE METHODS
-
-Here are common class or instance methods of DBIx::MoCo.
-
-=over 4
-
-=item object_id
-
-=item delete
-
 =item quote
 
-=back
-
-=head1 INSTANCE METHODS
-
-Here are common instance methods of DBIx::MoCo.
-
-=over 4
-
-=item flush_self_cache
-
-Flush caches for self possible object ids.
-
-=item store_self_cache
-
-Store self into cache for possible object ids.
-
-=item flush
-
-Delete attribute from given attr. name.
-
-=item param
-
-Set or get attribute from given attr. name.
-
-=item set
-
-Set attribute which is not related with DB schema or set temporary.
-
-=item has_primary_keys
-
-=item save
-
-Saves changed columns in session.
-
-=item object_ids
-
-Returns all possible object-ids.
+Quotes given string using DBI's quote method.
 
 =back
 
@@ -1111,7 +1045,7 @@ And then,
 
 =head1 SEE ALSO
 
-L<SQL::Abstract>, L<Class::DBI>, L<Cache>,
+L<DBIx::MoCo::DataBase>, L<SQL::Abstract>, L<Class::DBI>, L<Cache>,
 
 =head1 AUTHOR
 

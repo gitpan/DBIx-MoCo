@@ -94,18 +94,27 @@ sub delete_all : Tests {
     ok $bs->size == 0;
 }
 
-sub has_a : Tests {
-    my $has_a = Blog::Bookmark->has_a;
-    ok $has_a;
-    ok $has_a->{user};
-    is $has_a->{user}->{class}, 'Blog::User';
-    ok $has_a->{user}->{option};
-    is $has_a->{user}->{option}->{key}, 'user_id';
-    ok $has_a->{entry};
-    is $has_a->{entry}->{class}, 'Blog::Entry';
-    ok $has_a->{entry}->{option};
-    is $has_a->{entry}->{option}->{key}, 'entry_id';
-}
+# sub has_a : Tests {
+#     my $has_a = Blog::Bookmark->has_a;
+#     ok $has_a;
+#     ok $has_a->{user};
+#     is $has_a->{user}->{class}, 'Blog::User';
+#     ok $has_a->{user}->{option};
+#     is $has_a->{user}->{option}->{key}, 'user_id';
+#     ok $has_a->{entry};
+#     is $has_a->{entry}->{class}, 'Blog::Entry';
+#     ok $has_a->{entry}->{option};
+#     is $has_a->{entry}->{option}->{key}, 'entry_id';
+# }
+
+# sub has_many : Test(5) {
+#     my $has_many = Blog::User->has_many;
+#     ok $has_many;
+#     ok $has_many->{bookmarks};
+#     is $has_many->{bookmarks}->{class}, 'Blog::Bookmark';
+#     ok $has_many->{bookmarks}->{option};
+#     is $has_many->{bookmarks}->{option}->{key}, 'user_id';
+# }
 
 sub retrieve_all_id_hash : Tests {
     my $bs = Blog::Bookmark->retrieve_all_id_hash(
@@ -114,15 +123,6 @@ sub retrieve_all_id_hash : Tests {
     ok ($bs, 'retrieve_all_id_hash');
     ok ($bs->[0], 'has item');
     isa_ok ($bs->[0], 'HASH', 'item');
-}
-
-sub has_many : Test(5) {
-    my $has_many = Blog::User->has_many;
-    ok $has_many;
-    ok $has_many->{bookmarks};
-    is $has_many->{bookmarks}->{class}, 'Blog::Bookmark';
-    ok $has_many->{bookmarks}->{option};
-    is $has_many->{bookmarks}->{option}->{key}, 'user_id';
 }
 
 sub object_id : Tests {
@@ -334,7 +334,7 @@ sub map_attr : Tests {
 }
 
 sub cache_status : Test(4) {
-    my $cs = $DBIx::MoCo::cache_status;
+    my $cs = DBIx::MoCo->cache_status;
     my %pre = %$cs;
     my $u = Blog::User->retrieve(1);
     is $cs->{retrieve_count}, $pre{retrieve_count} + 1;
@@ -351,7 +351,7 @@ sub cache_status : Test(4) {
 }
 
 sub has_many_cache_slice : Tests {
-    my $cs = $DBIx::MoCo::cache_status;
+    my $cs = DBIx::MoCo->cache_status;
     my $u = Blog::User->retrieve(1);
     Blog::Bookmark->create(
         user_id => 1,

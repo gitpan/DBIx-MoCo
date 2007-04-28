@@ -83,4 +83,39 @@ sub reconnect : Tests {
     ok $data;
 }
 
+sub replicatioin : Tests {
+    my $db = 'TestDataBase';
+    $db->dsn('dbi:mysql:dbname=test');
+    is ($db->get_dsn, 'dbi:mysql:dbname=test', 'single string dsn');
+    $db->dsn(['dbi:mysql:dbname=test;host=db1','dbi:mysql:dbname=test;host=db2']);
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db1', 'single array dsn 1');
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db2', 'single array dsn 2');
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db1', 'single array dsn 3');
+    $db->dsn(
+        master => ['dbi:mysql:dbname=test;host=db1','dbi:mysql:dbname=test;host=db2'],
+    );
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db1', 'master array dsn 1');
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db2', 'master array dsn 2');
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db1', 'master array dsn 3');
+    is ($db->get_dsn('SELECT 1'), 'dbi:mysql:dbname=test;host=db2', 'master array select');
+    is ($db->get_dsn('INSERT 1'), 'dbi:mysql:dbname=test;host=db1', 'master array insert');
+    $db->dsn(
+        master => 'dbi:mysql:dbname=test;host=db1',
+        slave => ['dbi:mysql:dbname=test;host=db2','dbi:mysql:dbname=test;host=db3'],
+    );
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db1', 'master-slave no sql');
+    is ($db->get_dsn, 'dbi:mysql:dbname=test;host=db1', 'master-slave no sql 2');
+    is ($db->get_dsn('SELECT 1'), 'dbi:mysql:dbname=test;host=db2', 'master-slave select sql 1');
+    is ($db->get_dsn('SELECT 1'), 'dbi:mysql:dbname=test;host=db3', 'master-slave select sql 2');
+    is ($db->get_dsn('SELECT 1'), 'dbi:mysql:dbname=test;host=db2', 'master-slave select sql 3');
+    is ($db->get_dsn('INSERT 1'), 'dbi:mysql:dbname=test;host=db1', 'master-slave insert sql 1');
+    is ($db->get_dsn('INSERT 1'), 'dbi:mysql:dbname=test;host=db1', 'master-slave insert sql 2');
+}
+
+1;
+
+# TestDataBase
+package TestDataBase;
+use base qw(DBIx::MoCo::DataBase);
+
 1;

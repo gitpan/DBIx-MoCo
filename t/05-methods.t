@@ -27,4 +27,14 @@ sub quote : Tests {
     is ($u->quote("it's fine day!"), "'it''s fine day!'");
 }
 
+sub universal_can : Tests {
+    ok (Blog::User->can('has_a'), 'User can has_a');
+    ok (Blog::User->can('retrieve'), 'User can retrieve');
+    ok (Blog::User->can('name'), 'User can name');
+    ok (Blog::User->can('entries'), 'User can entries');
+    ok (!Blog::User->can('jump'), 'User cannot jump');
+    ok (Blog::User->can('retrieve_by_name'), 'User can retrieve_by_name');
+    ok (Blog::User->can('name_as_URI'), 'User can name_as_URI');
+}
+
 1;
