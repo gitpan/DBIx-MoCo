@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 use File::Spec;
-use lib File::Spec->catdir('lib');
+
 use lib File::Spec->catdir('t', 'lib');
 
 ThisTest->runtests;

@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 use File::Spec;
-use lib File::Spec->catdir('lib');
+
 use lib File::Spec->catdir('t', 'lib');
 
 ThisTest->runtests;
@@ -51,6 +51,46 @@ sub uri : Tests {
     ok ($uri3, 'uri3');
     isa_ok ($uri3, 'URI', 'uri3 isa URI');
     is ($uri3->as_string, $uri2->as_string, 'uri2 eq uri3');
+}
+
+sub utc_datetime : Tests {
+    my $e = Blog::Entry->retrieve(1);
+    ok ($e->created, 'has created');
+    is ($e->created, '2007-03-04 12:34:56', 'created');
+    my $dt = $e->created_as_UTCDateTime;
+    ok ($dt, 'has UTCDateTime');
+    my $tz = $dt->time_zone;
+    ok ($tz, 'has time zone');
+    isa_ok ($tz, 'DateTime::TimeZone');
+    is ($tz->name, 'UTC', 'tz is UTC');
+    is ($dt->ymd . ' ' . $dt->hms, '2007-03-04 12:34:56', 'utc');
+    $dt->set_time_zone('Asia/Tokyo');
+    is ($dt->ymd . ' ' . $dt->hms, '2007-03-04 21:34:56', 'asia/tokyo');
+    my $dt2 = $dt->clone;
+    $dt2->add(days => 1);
+    $e->created_as_UTCDateTime($dt2);
+    is ($e->created, '2007-03-05 12:34:56', 'created');
+    $e->created_as_UTCDateTime($dt);
+}
+
+sub datetime : Tests {
+    my $e = Blog::Entry->retrieve(1);
+    ok ($e->created, 'has created');
+    is ($e->created, '2007-03-04 12:34:56', 'created');
+    my $dt = $e->created_as_DateTime;
+    ok ($dt, 'has UTCDateTime');
+    my $tz = $dt->time_zone;
+    ok ($tz, 'has time zone');
+    isa_ok ($tz, 'DateTime::TimeZone');
+    is ($tz->name, 'floating', 'tz is floating');
+    is ($dt->ymd . ' ' . $dt->hms, '2007-03-04 12:34:56', 'floating');
+    $dt->set_time_zone('Asia/Tokyo');
+    is ($dt->ymd . ' ' . $dt->hms, '2007-03-04 12:34:56', 'asia/tokyo');
+    my $dt2 = $dt->clone;
+    $dt2->add(days => 1);
+    $e->created_as_DateTime($dt2);
+    is ($e->created, '2007-03-05 12:34:56', 'created');
+    $e->created_as_DateTime($dt);
 }
 
 sub my_column : Tests {

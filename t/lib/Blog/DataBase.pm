@@ -43,6 +43,11 @@ __PACKAGE__->execute('insert into entry values (?,?,?,?,?)',undef,$_)
     for @entries;
 
 __PACKAGE__->execute(<<EOF);
+ALTER TABLE entry ADD created DATETIME
+EOF
+__PACKAGE__->execute('update entry set created = ?',undef,['2007-03-04 12:34:56']);
+
+__PACKAGE__->execute(<<EOF);
 CREATE TABLE bookmark (
   user_id INTEGER,
   entry_id INETEGER,

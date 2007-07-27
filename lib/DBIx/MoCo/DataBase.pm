@@ -12,30 +12,33 @@ __PACKAGE__->cache_connection(1);
 
 our $DEBUG = 0;
 
+# $Carp::CarpLevel = 2;
 my $sqla = SQL::Abstract->new;
 
 sub insert {
     my $class = shift;
     my ($table, $args) = @_;
     my ($sql, @binds) = $sqla->insert($table,$args);
-    carp $sql . '->execute(' . join(',', @binds) . ')' if $DEBUG;
     $class->execute($sql,undef,\@binds);
 }
 
 sub delete {
     my $class = shift;
     my ($table, $where) = @_;
-    ref $where eq 'HASH' or croak 'where must be a HASH';
+    $where or croak "where is not specified to delete from $table";
+    (ref $where eq 'HASH' && %$where) or croak "where is not specified to delete from $table";
     my ($sql, @binds) = $sqla->delete($table,$where);
-    carp $sql . '->execute(' . join(',', @binds) . ')' if $DEBUG;
+    $sql =~ /WHERE/io or croak "where is not specified to delete from $table";
     $class->execute($sql,undef,\@binds);
 }
 
 sub update {
     my $class = shift;
     my ($table, $args, $where) = @_;
+    $where or croak "where is not specified to update $table";
+    (ref $where eq 'HASH' && %$where) or croak "where is not specified to update $table";
     my ($sql, @binds) = $sqla->update($table,$args,$where);
-    carp $sql . '->execute(' . join(',', @binds) . ')' if $DEBUG;
+    $sql =~ /WHERE/io or croak "where is not specified to update $table";
     $class->execute($sql,undef,\@binds);
 }
 
@@ -44,7 +47,6 @@ sub select {
     my ($table, $args, $where, $order, $limit) = @_;
     my ($sql, @binds) = $sqla->select($table,$args,$where,$order);
     $sql .= $class->_parse_limit($limit) if $limit;
-    carp $sql . '->execute(' . join(',', @binds) . ')' if $DEBUG;
     my $data;
     $class->execute($sql,\$data,\@binds) or return;
     return $data;
@@ -54,7 +56,6 @@ sub search {
     my $class = shift;
     my %args = @_;
     my ($sql, @binds) = $class->_search_sql(\%args);
-    carp $sql . '->execute(' . join(',', @binds) . ')' if $DEBUG;
     my $data;
     $class->execute($sql,\$data,\@binds) or return;
     return $data;
@@ -154,14 +155,15 @@ sub dsn {
     }
 }
 
-sub get_dsn { croak "You must set up your dsn first." }
+sub get_dsn { croak "You must set up your dsn first" }
 
 sub dbh {
     my $class = shift;
     my $sql = shift;
     my $connect = $class->cache_connection ? 'connect_cached' : 'connect';
     my $dsn = $class->get_dsn($sql);
-    DBI->$connect($dsn, $class->username, $class->password);
+    my $opt = {RaiseError => 1};
+    DBI->$connect($dsn, $class->username, $class->password, $opt);
 }
 
 sub execute {
@@ -173,6 +175,10 @@ sub execute {
     my $sth = @bind_values ? $dbh->prepare_cached($sql,undef,1) :
         $dbh->prepare($sql);
     unless ($sth) { carp $dbh->errstr and return; }
+    if ($DEBUG) {
+        my @binds = map { defined $_ ? "'$_'" : "'NULL'" } @bind_values; 
+        carp $sql . '->execute(' . join(',', @binds) . ')';
+    }
     if (defined $data) {
         $sth->execute(@bind_values) or 
             carp sprintf('SQL Error: "%s" (%s)', $sql, $sth->errstr) and return;
@@ -198,15 +204,20 @@ sub vendor {
 sub primary_keys {
     my $class = shift;
     my $table = shift or return;
+    my $dbh = $class->dbh;
     if ($class->vendor eq 'MySQL') {
-        my $sth = $class->dbh->column_info(undef,undef,$table,'%');
+        my $sth = $dbh->column_info(undef,undef,$table,'%') or
+            croak $dbh->errstr;
+        $dbh->err and croak $dbh->errstr;
+        my @cols = @{$sth->fetchall_arrayref({})} or
+            croak "couldnt get primary keys";
         return [
             map {$_->{COLUMN_NAME}}
             grep {$_->{mysql_is_pri_key}}
-            @{$sth->fetchall_arrayref({})}
+            @cols
         ];
     } else {
-        return [$class->dbh->primary_key(undef,undef,$table)];
+        return [$dbh->primary_key(undef,undef,$table)];
     }
 }
 
@@ -214,9 +225,11 @@ sub unique_keys {
     my $class = shift;
     my $table = shift or return;
     if ($class->vendor eq 'MySQL') {
-        my $sql = "show index from $table";
+        my $sql = "SHOW INDEX FROM $table";
         my $data;
-        $class->execute($sql,\$data);
+        $class->execute($sql,\$data) or
+            croak "couldnt get unique keys";
+        @$data or croak "couldnt get unique keys";
         return [
             map {$_->{Column_name}}
             grep {!$_->{Non_unique}}
@@ -230,10 +243,14 @@ sub unique_keys {
 sub columns {
     my $class = shift;
     my $table = shift or return;
+    my $dbh = $class->dbh;
     if (my $sth = $class->dbh->column_info(undef,undef,$table,'%')) {
+        croak $dbh->errstr if $dbh->err;
+        my @cols = @{$sth->fetchall_arrayref({})} or
+            croak "couldnt get primary keys";
         return [
             map {$_->{COLUMN_NAME}}
-            @{$sth->fetchall_arrayref({})}
+            @cols
         ];
     } else {
         my $d = $class->select($table,'*',undef,'',{limit => 1}) or return;

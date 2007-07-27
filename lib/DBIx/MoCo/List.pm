@@ -65,6 +65,26 @@ sub last {
     $_[0]->[-1];
 }
 
+sub slice {
+    my $self = CORE::shift;
+    my ($s, $e) = @_;
+    my $last = $#{$self};
+    # warn "s: $s, e: $e, last: $last";
+    if (defined $e) {
+        if ($s == 0 && $last <= $e) {
+            return $self;
+        } else {
+            $e = $last if ($last < $e);
+            return $self->new([ @$self[ $s .. $e ] ]);
+        }
+    } elsif (defined $s && 0 < $s && $last <= $s) {
+        # warn $self->first . "s: $s, e: $e, self:" . $#{$self};
+        return $self->new([]);
+    } else {
+        return $self;
+    }
+}
+
 sub dump {
     my $self = CORE::shift;
     require Data::Dumper;

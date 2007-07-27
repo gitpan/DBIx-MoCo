@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 use File::Spec;
-use lib File::Spec->catdir('lib');
+
 use lib File::Spec->catdir('t', 'lib');
 
 ThisTest->runtests;
@@ -63,11 +63,13 @@ sub create : Tests {
     is $u->user_id, 7;
     is $u->name, 'lucky7';
     my ($u2) = Blog::User->search(where => {user_id =>7});
-    ok (!$u2);
+    # ok (!$u2);
+    ok ($u2);
     $u->name('lucky lucky 7');
     is $u->name, 'lucky lucky 7';
     my ($u3) = Blog::User->search(where => {user_id =>7});
-    ok (!$u3);
+    # ok (!$u3);
+    ok ($u3);
     DBIx::MoCo->end_session;
     DBIx::MoCo->start_session;
     my ($u4) = Blog::User->search(where => {user_id =>7});

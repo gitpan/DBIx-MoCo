@@ -10,24 +10,30 @@ use DBIx::MoCo::Column;
 use Carp;
 use Class::Trigger;
 use UNIVERSAL::require;
-use Scalar::Util qw(weaken);
+# use Scalar::Util qw(weaken);
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 our $AUTOLOAD;
 
 my $cache_status = {
     retrieve_count => 0,
     retrieve_cache_count => 0,
+    retrieve_icache_count => 0,
     retrieve_all_count => 0,
     has_many_count => 0,
     has_many_cache_count => 0,
+    has_many_icache_count => 0,
     retrieved_oids => [],
 };
-my ($cache,$db,$session);
+my ($db,$session,$schema);
 
-__PACKAGE__->mk_classdata($_) for qw(cache_object db_object table
-                                     retrieve_keys _schema);
-__PACKAGE__->cache_object('DBIx::MoCo::Cache');
+__PACKAGE__->mk_classdata($_) for 
+    qw(cache_object default_cache_expiration icache_expiration
+       cache_null_object db_object table);
+__PACKAGE__->cache_object(DBIx::MoCo::Cache->new);
+__PACKAGE__->default_cache_expiration(60 * 60 * 3); # 3 hours
+__PACKAGE__->icache_expiration(0); # Instance cache
+__PACKAGE__->cache_null_object(1);
 
 # SESSION & CACHE CONTROLLERS
 __PACKAGE__->add_trigger(after_create => sub {
@@ -58,10 +64,19 @@ sub cache_status { $cache_status }
 sub cache {
     my $class = shift;
     $class = ref($class) if ref($class);
-    my ($k,$v) = @_;
-    $cache ||= $class->cache_object->new;
-    $cache->set($k => $v) if defined $v;
-    return $cache->get($k);
+    my ($k,$v,$ex) = @_;
+    my $cache = $class->cache_object;
+    # warn "$cache in $class";
+    my $s = $class->is_in_session;
+    if (defined $v) {
+        $ex ||= $class->default_cache_expiration;
+        $ex = "+$ex" if ($ex && ref($cache) eq 'Cache::Memory');
+        $cache->set($k,$v,$ex);
+        # warn $cache . '->set(' . $k . ')';
+        $s->{cache}->{$k} = $v if $s;
+    }
+    # warn "hit session cache for $k" if ($s && $s->{cache}->{$k});
+    return $s->{cache}->{$k} || $cache->get($k);
 }
 
 sub flush_belongs_to {} # it's delivered from MoCo::Relation
@@ -73,10 +88,11 @@ sub flush_self_cache {
         $class = ref $self;
     }
     $self or confess '$self is not specified';
+    my $rm = $class->cache_object->can('remove') ? 'remove' : 'delete';
     for (@{$self->object_ids}) {
         # warn "flush $_";
-        weaken($class->cache($_));
-        $cache->remove($_);
+        # weaken($class->cache($_));
+        $class->cache_object->$rm($_);
     }
 }
 
@@ -88,7 +104,55 @@ sub store_self_cache {
     }
     $self or confess '$self is not specified';
     # warn "store $_" for @{$self->object_ids};
+    my $icache = $self->icache;
+    $self->flush_icache;
     $class->cache($_, $self) for @{$self->object_ids};
+    $self->icache($icache) if $icache;
+}
+
+sub icache {
+    my $self = shift;
+    if ($_[0]) {
+        $self->{_icache} = shift;
+    } else {
+        my $ex = $self->icache_expiration;
+        $ex > 0 or return;
+        if (!$self->{_icache} ||
+                ($self->{_icache}->{_created} + $ex < time())) {
+            $self->{_icache} = {_created => time()};
+        }
+    }
+    return $self->{_icache};
+}
+
+sub flush_icache {
+    my $self = shift;
+    $self->{_icache} or return;
+    if ($_[0]) {
+        # warn "flush icache $_[0] for " . $self;
+        delete $self->{_icache}->{$_[0]};
+    } else {
+        $self->{_icache} = undef;
+    }
+}
+
+sub has_many_max_offset_name {
+    my $class = shift;
+    my $attr = shift or return;
+    return sprintf('_%s_max_offset', $attr);
+}
+
+sub has_many_keys_name {
+    my $class = shift;
+    my $attr = shift or return;
+    return sprintf('_%s_keys', $attr);
+}
+
+sub flush_has_many_keys {
+    my $self = shift;
+    my $attr = shift or return;
+    $self->flush($self->has_many_keys_name($attr));
+    $self->flush($self->has_many_max_offset_name($attr));
 }
 
 # session controllers
@@ -97,6 +161,7 @@ sub start_session {
     $class->end_session if $class->is_in_session;
     $session = {
         changed_objects => [],
+        cache => {},
         pid => $$,
         created => time(),
     };
@@ -129,17 +194,31 @@ sub has_many {
     my $class = shift;
     $class->relation->register($class, 'has_many', @_);
 }
+
 sub schema {
     my $class = shift;
-    unless ($class->_schema) {
-        $class->_schema(DBIx::MoCo::Schema->new($class));
+    $class = ref $class if ref $class;
+    unless ($schema->{$class}) {
+        $schema->{$class} = DBIx::MoCo::Schema->new($class);
     }
-    return $class->_schema;
+    return $schema->{$class};
 }
 
 sub primary_keys { $_[0]->schema->primary_keys }
+
+sub retrieve_keys {
+    my $class = shift;
+    $class->schema->retrieve_keys(@_);
+}
+
 sub unique_keys { $_[0]->schema->unique_keys }
 sub columns { $_[0]->schema->columns }
+
+sub has_muid {
+    my $class = shift;
+    return ($class->has_column('muid') &&
+                scalar @{$class->primary_keys} == 1);
+}
 
 sub has_column {
     my $class = shift;
@@ -148,31 +227,60 @@ sub has_column {
     grep { $col eq $_ } @{$class->columns};
 }
 
+sub utf8_columns {
+    my $class = shift;
+    $class->schema->utf8_columns(@_);
+}
+
+sub is_utf8_column {
+    my $class = shift;
+    my $col = shift or return;
+    my $utf8 = $class->utf8_columns or return;
+    ref $utf8 eq 'ARRAY' or return;
+    return grep { $_ eq $col } @$utf8;
+}
+
 # DATA OPERATIONAL METHODS
 sub object_id {
     my $self = shift;
     my $class = ref($self) || $self;
     $self = undef unless ref($self);
+    my $prefix = $class->object_id_prefix || '';
     my ($key, $col);
     if ($self && $self->{object_id}) {
         return $self->{object_id};
-    } elsif ($self) {
-        for (sort @{$class->retrieve_keys || $class->primary_keys}) {
-            $self->{$_} or warn "$_ is undefined for $self" and return;
-            $key .= "-$_-" . $self->{$_};
+    } elsif ($self && @{$class->retrieve_keys || $class->primary_keys}) {
+        if ($self->has_muid) {
+            $key = $self->muid;
+        } else {
+            for (sort @{$class->retrieve_keys || $class->primary_keys}) {
+                defined($self->{$_}) or warn "$_ is undefined for $self" and return;
+                $key .= "-$_-" . $self->{$_};
+            }
+            $key or die "couldn't create object_id for " . $self;
+            $key = $prefix . $key;
         }
-        $key = $class . $key;
     } elsif ($_[3]) {
         my %args = @_;
         $key .= "-$_-$args{$_}" for (sort keys %args);
-        $key = $class . $key;
+        $key = $prefix . $key;
     } elsif (@{$class->primary_keys} == 1) {
         my @args = @_;
         $col = $args[1] ? $args[0] : $class->primary_keys->[0];
         my $value = $args[1] ? $args[1] : $args[0];
-        $key = $class . '-' . $col . '-' . $value;
+        if ($col eq 'muid') {
+            $key = $value;
+        } else {
+            $key = $prefix . '-' . $col . '-' . $value;
+        }
     }
     return $key;
+}
+
+sub object_id_prefix {
+    my $class = shift;
+    $class = ref $class if ref $class;
+    return $class;
 }
 
 sub db { $_[0]->db_object }
@@ -181,25 +289,71 @@ sub retrieve {
     my $cs = $cache_status;
     $cs->{retrieve_count}++;
     my $class = shift;
+    $_[0] or carp "Retrieve keys not found";
     my $oid = $class->object_id(@_);
-    if (defined $class->cache($oid)) {
+    my $c = $class->cache($oid);
+    if (defined $c) {
         # warn "use cache $oid";
         $cs->{retrieve_cache_count}++;
-        return $class->cache($oid);
+        return $c;
     } else {
         # warn "use db $oid";
-        push @{$cs->{retrieved_oids}}, $oid if $class->is_in_session;
-        my %args = $_[1] ? @_ : ($class->primary_keys->[0] => $_[0]);
-        my $res = $class->db->select($class->table,'*',\%args);
-        my $h = $res->[0];
-        my $o = $h ? $class->new(%$h) : '';
+        my $o = $class->retrieve_by_db(@_);
         if ($o) {
             $class->store_self_cache($o);
+            push @{$cs->{retrieved_oids}}, $oid if $class->is_in_session;
         } else {
             # $class->cache($oid => $o) if $o;
-            $class->cache($oid => $o); # cache null object for performance.
+            # cache null object for performance.
+            $class->cache($oid => $o) if $class->cache_null_object;
         }
         return $o;
+    }
+}
+
+sub retrieve_by_db {
+    my $class = shift;
+    my %args = defined $_[1] ? @_ : ($class->primary_keys->[0] => $_[0]);
+    my $res = $class->db->select($class->table,'*',\%args);
+    my $h = $res->[0];
+    return $h ? $class->new(%$h) : '';
+}
+
+sub restore_from_db {
+    my $self = shift;
+    my $class = ref $self or return;
+    my $hash = $self->primary_keys_hash or return;
+    my $res = $class->db->select($class->table,'*',$hash);
+    my $h = $res->[0] or return;
+    @{$self}{keys %$h} = @{$h}{keys %$h};
+    $class->store_self_cache($self);
+    return $self;
+}
+
+sub retrieve_multi {
+    my $class = shift;
+    my @list = @_ or return DBIx::MoCo::List->new([]);
+    if ($class->cache_object->can('get_multi')) {
+        my $ids = [map {$class->object_id(%$_)} @list];
+        my $res = [];
+        my $cs = $cache_status;
+        my $hash = $class->cache_object->get_multi(@$ids) || {};
+        # warn join(', ', %$hash);
+        $cs->{retrieve_count} += scalar @list;
+        if (my $c = scalar keys %$hash) {
+            # warn "found $c caches in get_multi";
+            $cs->{retrieve_cache_count} += $c;
+        }
+        for (my $i = 0; $i <= $#list; $i++) {
+            my $o = $hash->{$ids->[$i]} || $class->retrieve_by_db(%{$list[$i]}) || next;
+            $class->store_self_cache($o);
+            push @{$cs->{retrieved_oids}}, $ids->[$i] if $class->is_in_session;
+            push @$res, $o if $o;
+        }
+        # warn join(', ', @$res);
+        return DBIx::MoCo::List->new($res);
+    } else {
+        return DBIx::MoCo::List->new([map{$class->retrieve(%$_)} @list]);
     }
 }
 
@@ -237,18 +391,18 @@ sub create {
     my %args = @_;
     $class->call_trigger('before_create', \%args);
     my $o = $class->new(%args);
-    if ($class->is_in_session && $o->has_primary_keys) {
-        $o->set(to_be_inserted => 1);
-        $o->changed_cols->{$_}++ for (keys %args);
-        push @{$class->session->{changed_objects}}, $o;
-    } else {
+#     if ($class->is_in_session && $o->has_primary_keys) {
+#         $o->set(to_be_inserted => 1);
+#         $o->changed_cols->{$_}++ for (keys %args);
+#         push @{$class->session->{changed_objects}}, $o;
+#     } else {
         $class->db->insert($class->table,\%args) or croak 'couldnt create';
         my $pk = $class->primary_keys->[0];
-        unless ($args{$pk}) {
+        unless (defined $args{$pk}) {
             my $id = $class->db->last_insert_id;
             $o->set($pk => $id);
         }
-    }
+#     }
     $class->call_trigger('after_create', $o);
     return $o;
 }
@@ -259,10 +413,13 @@ sub delete {
     $self = shift unless ref($self);
     $self or return;
     $self->call_trigger('before_delete', $self);
+    $self->has_primary_keys or return;
     my %args;
     for (@{$class->primary_keys}) {
-        $args{$_} = $self->{$_} or die "$self doesn't have $_";
+        $args{$_} = $self->{$_};
+        defined($args{$_}) or die "$self doesn't have $_";
     }
+    %args or die "$self doesn't have where condition";
     my $res = $class->db->delete($class->table,\%args) or croak 'couldnt delete';
     $self = undef;
     return $res;
@@ -388,8 +545,7 @@ sub _column_as_handler {
 sub column {
     my $self = shift;
     my $col = shift or return;
-    my $v = $self->{$col} or return;
-    return DBIx::MoCo::Column->new($v);
+    return DBIx::MoCo::Column->new($self->{$col});
 }
 
 sub _retrieve_by_handler {
@@ -446,29 +602,43 @@ sub flush {
     my $attr = shift or return;
     # warn "flush " . $self->object_id . '->' . $attr;
     $self->{$attr} = undef;
+    $self->store_self_cache($self);
 }
 
 sub param {
     my $self = shift;
     my $class = ref $self or return;
-    return $self->{$_[0]} unless defined($_[1]);
-    @_ % 2 and croak "You gave me an odd number of parameters to param()!";
-    $class->call_trigger('before_update', $self);
-    my %args = @_;
-    $self->{$_} = $args{$_} for (keys %args);
-    if ($class->is_in_session) {
-        $self->{to_be_updated}++;
-        $self->{changed_cols}->{$_}++ for (keys %args);
-        push @{$class->session->{changed_objects}}, $self;
-    } else {
-        my %where;
-        for (@{$class->primary_keys}) {
-            $where{$_} = $self->{$_} or return;
+    # if (defined $_[1]) {
+    if (@_ > 1) {
+        @_ % 2 and croak "You gave me an odd number of parameters to param()!";
+        my %args = @_;
+        $class->call_trigger('before_update', $self, \%args);
+        $self->{$_} = $args{$_} for (keys %args);
+        if ($class->is_in_session) {
+            $self->{to_be_updated}++;
+            $self->{changed_cols}->{$_}++ for (keys %args);
+            push @{$class->session->{changed_objects}}, $self;
+        } else {
+            my $where = $self->primary_keys_hash or return;
+            %$where or return;
+            $class->db->update($class->table,\%args,$where) or croak 'couldnt update';
         }
-        $class->db->update($class->table,\%args,\%where) or croak 'couldnt update';
+        $class->call_trigger('after_update', $self);
+        # return 1;
     }
-    $class->call_trigger('after_update', $self);
-    return 1;
+    return $self->{$_[0]};
+}
+
+sub primary_keys_hash {
+    my $self = shift;
+    my $class = ref $self or return;
+    @{$class->primary_keys} or return;
+    my $hash = {};
+    for (@{$class->primary_keys}) {
+        $hash->{$_} = $self->{$_};
+        defined $hash->{$_} or return;
+    }
+    return $hash;
 }
 
 sub set {
@@ -481,7 +651,7 @@ sub has_primary_keys {
     my $self = shift;
     my $class = ref $self;
     for (@{$class->primary_keys}) {
-        $self->{$_} or return;
+        defined $self->{$_} or return;
     }
     return 1;
 }
@@ -492,7 +662,8 @@ sub save {
     keys %{$self->{changed_cols}} or return;
     my %args;
     for (keys %{$self->{changed_cols}}) {
-        defined $self->{$_} or croak "$_ is undefined";
+#        defined $self->{$_} or croak "$_ is undefined";
+        exists $self->{$_} or croak "$_ is undefined";
         $args{$_} = $self->{$_};
     }
     if ($self->{to_be_inserted}) {
@@ -500,11 +671,9 @@ sub save {
         $self->{changed_cols} = {};
         $self->{to_be_inserted} = undef;
     } elsif ($self->{to_be_updated}) {
-        my %where;
-        for (@{$class->primary_keys}) {
-            $where{$_} = $self->{$_} or croak "$_ is undefined";
-        }
-        $class->db->update($class->table,\%args,\%where);
+        my $where = $self->primary_keys_hash or return;
+        %$where or return;
+        $class->db->update($class->table,\%args,$where);
         $self->{changed_cols} = {};
         $self->{to_be_updated} = undef;
     }
@@ -516,7 +685,7 @@ sub object_ids { # returns all possible oids
     my $oids = {};
     $oids->{$self->object_id} = 1 if $self->object_id;
     for my $key (@{$class->unique_keys}) {
-        next unless $self->{$key};
+        next unless defined $self->{$key};
         my $oid = $class->object_id($key => $self->{$key}) or next;
         $oids->{$oid}++;
     }
@@ -646,6 +815,7 @@ Light & Fast Model Component
 =head1 CACHE ALGORITHM
 
 MoCo caches objects effectively.
+
 There are 3 functions to control MoCo's cache. Their functions are called 
 appropriately when some operations are called to a particular object.
 
@@ -787,6 +957,19 @@ Returns array reference of column names.
 
 Returns which the table has the column or not.
 
+=item utf8_columns
+
+Receives array reference and defines utf8 columns.
+When you call utf8 column method, you'll get string with utf8 flag on.
+But you can get raw string when you call param('colname') method.
+
+  __PACKAGE__->utf8_columns([qw(title body)]);
+
+  my $e = Blog::Entry->retrieve(1);
+  print Encode::is_utf8($e->title); # true
+  print Encode::is_utf8($e->param('title')); # false
+  print Encode::is_utf8($e->uri); # false
+
 =back
 
 =head1 SESSION & CACHE METHODS
@@ -821,6 +1004,47 @@ Delete attribute from given attr. name.
 
 Saves changed columns in the current session.
 
+=item icache_expiration
+
+Specifies instance cache expiration time in seconds.
+MoCo store has_a, has_many instances in instance variable if this
+value is set.
+
+  __PACKAGE__->icache_expiration(30);
+
+It's not necessary to setup icache if you are runnnig MoCo with
+memory cache objects because default cache is more powerful and
+as fast as icache.
+
+You'd better to consider this option when you are running MoCo with
+centralized cache mechanism such as memcached.
+
+=item cache_null_object
+
+Specifies which MoCo will store null object when retrieve will fail.
+
+=item object_id_prefix
+
+This prefix is used for generating object ids and the ids are used as
+cache keys. Default value of this prefix is the name of class.
+
+This option is effective when you use some classes which have parent
+-child relationships and they represent same table.
+
+  package Blog::Entry;
+
+  sub object_id_prefix { 'Blog::Entry' }
+
+  1;
+
+  package Blog::Entry::Video;
+  use base qw(Blog::Entry);
+
+  1;
+
+MUID value is used for object_id when the class has muid field even if
+this prefix is specified.
+
 =back
 
 =head1 DATA OPERATIONAL METHODS
@@ -836,6 +1060,23 @@ Retrieves an object and returns that using cache (if possible).
   my $u1 = Blog::User->retrieve(123); # retrieve by primary_key
   my $u2 = Blog::User->retrieve(user_id => 123); # same as above
   my $u3 = Blog::User->retrieve(name => 'jkondo'); # retrieve by name
+
+=item restore_from_db
+
+Restores self attributes from db.
+
+=item retrieve_by_db
+
+Retrieves an object from db.
+
+=item retrieve_multi
+
+Returns results of given array of conditions.
+
+  my $users = Blog::User->retrieve_multi(
+    {user_id => 123},
+    {user_id => 234},
+  );
 
 =item retrieve_all
 

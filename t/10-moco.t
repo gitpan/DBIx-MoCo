@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 use File::Spec;
-use lib File::Spec->catdir('lib');
+
 use lib File::Spec->catdir('t', 'lib');
 
 #$DBIx::MoCo::DataBase::DEBUG = 1;
@@ -17,6 +17,7 @@ use DBIx::MoCo;
 use Blog::User;
 use Blog::Entry;
 use Blog::Bookmark;
+use Data::Dumper;
 
 sub use_test: Tests {
     use_ok 'DBIx::MoCo';
@@ -269,6 +270,7 @@ sub cache_has_a : Tests {
 }
 
 sub cache_has_many : Tests {
+    return;
     my $u = Blog::User->retrieve(1);
     is $u->entries, $u->entries;
 }
@@ -280,14 +282,14 @@ sub flush_objects : Tests {
     ok $bs;
     isa_ok $bs, 'DBIx::MoCo::List';
     my $bs2 = $u->bookmarks;
-    is $bs2, $bs;
+    is ($bs2->size, $bs->size, 'same size');
     my $e = Blog::Entry->retrieve(3);
     ok $e;
     my $bs3 = $e->bookmarks;
     ok $bs3;
     isa_ok $bs3, 'DBIx::MoCo::List';
     my $bs4 = $e->bookmarks;
-    is $bs4, $bs3;
+    is ($bs4->size, $bs3->size, 'same size');
     isnt $bs4, $bs;
     my $b = Blog::Bookmark->create(
         user_id => 2,
@@ -313,7 +315,7 @@ sub list_methods : Tests {
 sub map_attr : Tests {
     my $user = Blog::User->retrieve(1);
     $user->entries;
-    $user->flush('entries');
+    $user->flush($user->has_many_keys_name('bookmarks'));
     my $bs = $user->bookmarks;
     ok $bs;
     isa_ok $bs, 'DBIx::MoCo::List';
@@ -401,6 +403,10 @@ sub param : Tests {
     is $u->name, '21 girl';
     ok ($u->name('21 lady'));
     is $u->name, '21 lady';
+    ok (!$u->param(name => undef));
+    is ($u->name, undef);
+    $u = Blog::User->search(where => 'user_id = 21')->first;
+    is ($u->name, undef);
 }
 
 sub set : Tests {
@@ -431,6 +437,45 @@ sub object_ids : Tests {
         'Blog::Entry-entry_id-1',
         'Blog::Entry-uri-http://test.com/entry-1'
     ]);
+}
+
+sub cannot_update : Tests {
+    my $u = Blog::User->create(
+        user_id => 111,
+        name => 'one-one-one',
+    );
+    ok ($u, '111 user');
+    ok ($u->param(name => 'test1'), 'can param');
+    is ($u->name, 'test1', 'test1');
+    $u->{user_id} = undef;
+    eval "$u->param(name => 'test2')";
+    ok ($@, 'cannnot param');
+    is ($u->name, 'test1', 'test1');
+    eval "$u->delete";
+    ok ($@, 'cannnot delete');
+    $u = Blog::User->create(
+        user_id => 0,
+        name => 'zero',
+    );
+    is ($u->user_id, 0);
+    ok ($u->param(name => 'test2'), 'can param');
+    is ($u->name, 'test2', 'test2');
+    ok ($u->delete, 'can delete');
+    ok (!Blog::User->find({user_id => 0}), 'deleted');
+}
+
+sub restore_from_db : Tests {
+    my $u = Blog::User->create(
+        user_id => 36,
+        name => 'saburo',
+    );
+    ok ($u);
+    is ($u->param('name'), 'saburo');
+    $u->set(name => 'saburou');
+    is ($u->param('name'), 'saburou');
+    $u->restore_from_db;
+    ok ($u);
+    is ($u->param('name'), 'saburo');
 }
 
 1;

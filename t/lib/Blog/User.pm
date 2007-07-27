@@ -16,5 +16,6 @@ __PACKAGE__->has_many(
 );
 
 sub unique_keys { ['user_id', 'name'] }
+sub primary_keys { ['user_id'] }
 
 1;

@@ -4,11 +4,13 @@ use Carp;
 
 sub new {
     my $class = shift;
-    my $moco = shift or return;
+    my $klass = shift or return;
     my $self = {
-        moco => $moco,
+        class => $klass,
         primary_keys => undef,
         uniquie_keys => undef,
+        retrieve_keys => undef,
+        utf8_columns => undef,
         columns => undef,
     };
     bless $self, $class;
@@ -17,26 +19,48 @@ sub new {
 sub primary_keys {
     my $self = shift;
     unless ($self->{primary_keys}) {
-        my $moco = $self->{moco};
-        $self->{primary_keys} = $moco->db->primary_keys($moco->table);
+        my $class = $self->{class};
+        $self->{primary_keys} = $class->db->primary_keys($class->table);
     }
     $self->{primary_keys};
 }
 
 sub unique_keys {
     my $self = shift;
-    unless ($self->{uniquie_keys}) {
-        my $moco = $self->{moco};
-        $self->{unique_keys} = $moco->db->unique_keys($moco->table);
+    unless ($self->{unique_keys}) {
+        my $class = $self->{class};
+        $self->{unique_keys} = $class->db->unique_keys($class->table);
     }
     $self->{unique_keys};
+}
+
+sub retrieve_keys {
+    my $self = shift;
+    $self->{retrieve_keys} = $_[0] if $_[0];
+    return $self->{retrieve_keys};
+}
+
+sub utf8_columns {
+    my $self = shift;
+    if (my $cols = $_[0]) {
+        ref $cols eq 'ARRAY' or croak 'utf8_columns must be an array ref';
+        $self->{utf8_columns} = $cols;
+        my $class = $self->{class};
+        no strict 'refs';
+        for my $col (@$cols) {
+            my $method = $class . '::' . $col;
+            *$method = $class->_column_as_handler($col, 'utf8');
+            # warn $method;
+        }
+    }
+    return $self->{utf8_columns};
 }
 
 sub columns {
     my $self = shift;
     unless ($self->{columns}) {
-        my $moco = $self->{moco};
-        $self->{columns} = $moco->db->columns($moco->table);
+        my $class = $self->{class};
+        $self->{columns} = $class->db->columns($class->table);
     }
     $self->{columns};
 }

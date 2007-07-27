@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use base qw(DBIx::MoCo::Readonly);
 use Blog::DataBase;
+use Blog::Entry;
 
 __PACKAGE__->db_object('Blog::DataBase');
 __PACKAGE__->table('user');

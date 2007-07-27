@@ -1,5 +1,17 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.14 Fri Jul 27 2007
+	- Added restore_from_db
+	- Added where check to update, delete
+	- Added ichache feature to cache in instance variables
+	- Added DBIx::MoCo::Column::utf8
+	- Added utf8_columns definition feature and utf8 flag handling
+	- Added session cache
+	- Chanded DBIx::MoCo::Relation to slim methods.
+	- Added MUID handling in object_ids.
+	- Added DBIx::MoCo::MUID for muid fields.
+	- Added DBIx::MoCo::Column::DateTime, UTCDateTime for L10n.
+
 0.13 Fri Apr 27 2007
         - Added MoCo::Relation
 	- Added replication features

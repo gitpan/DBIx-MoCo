@@ -4,7 +4,7 @@ use Carp;
 
 sub new {
     my $class = shift;
-    my $self = shift; # scalar
+    my $self = shift || ''; # scalar
     bless \$self, $class;
 }
 

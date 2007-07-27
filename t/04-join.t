@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 use File::Spec;
-use lib File::Spec->catdir('lib');
+
 use lib File::Spec->catdir('t', 'lib');
 
 ThisTest->runtests;
@@ -21,9 +21,9 @@ sub use_test : Tests {
 }
 
 sub methods : Tests {
-    is (DBIx::MoCo::Join->schema, undef);
-    is (DBIx::MoCo::Join->primary_keys, undef);
-    is (DBIx::MoCo::Join->unique_keys, undef);
+    isa_ok (DBIx::MoCo::Join->schema, 'DBIx::MoCo::Schema');
+    is_deeply (DBIx::MoCo::Join->primary_keys, []);
+    is_deeply (DBIx::MoCo::Join->unique_keys, []);
     is (DBIx::MoCo::Join->columns, undef);
     is (DBIx::MoCo::Join->cache, undef);
 }
@@ -44,7 +44,7 @@ sub bookmark_entry : Tests {
     is $u->name, 'jkondo';
     eval {$b->param(title => 'wanna change')};
     ok $@, 'fail change';
-    is $b->primary_keys, undef;
+    is_deeply $b->primary_keys, [];
 }
 
 1;

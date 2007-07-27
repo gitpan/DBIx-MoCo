@@ -16,6 +16,13 @@ WriteMakefile(
         FormValidator::Simple => 0,
         URI => 0,
         UNIVERSAL::require => 0,
+        DateTime => 0,
+        DateTime::Format::MySQL => 0,
+        Net::Address::Ethernet => 0,
+        Math::BigInt::Lite => 0,
+        Time::HiRes => 0,
+        Storable => 0,
+        Data::Dumper => 0,
     },
     ($] >= 5.005 ?
       (ABSTRACT_FROM  => 'lib/DBIx/MoCo.pm',

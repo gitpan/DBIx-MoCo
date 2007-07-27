@@ -2,10 +2,12 @@
 use strict;
 use warnings;
 use File::Spec;
-use lib File::Spec->catdir('lib');
-use lib File::Spec->catdir('t', 'lib');
 
-Blog::Class->cache_object('Cache::Memory');
+use lib File::Spec->catdir('t', 'lib');
+use Cache::Memory;
+use Blog::Class;
+
+Blog::Class->cache_object(Cache::Memory->new);
 ThisTest->runtests;
 
 # ThisTest
@@ -15,9 +17,7 @@ use Test::More;
 use Blog::User;
 
 sub cache_memory : Tests {
-    is (Blog::Class->cache_object, 'Cache::Memory');
-    eval {use Cache::Memory };
-    return if $@;
+    isa_ok (Blog::Class->cache_object, 'Cache::Memory');
     my $u1 = Blog::User->retrieve(1);
     my $u2 = Blog::User->retrieve(1);
     is $u2, $u1;

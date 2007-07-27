@@ -3,9 +3,8 @@ use strict;
 use Carp;
 use base qw(DBIx::MoCo::Readonly);
 
-sub schema {}
-sub primary_keys {}
-sub unique_keys {}
+sub primary_keys {[]}
+sub unique_keys {[]}
 sub cache {}
 sub columns {}
 
