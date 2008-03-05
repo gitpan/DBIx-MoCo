@@ -11,7 +11,7 @@ sub new { bless {}, shift }
 sub set {
     my $self = shift;
     my ($k,$v) = @_;
-    $cache->{$k} = $v;
+    $cache->{$k} = $v if defined $k;
 }
 
 sub get {

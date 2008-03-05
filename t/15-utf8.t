@@ -32,9 +32,9 @@ sub is_utf8_column : Tests {
 
 sub as_utf8 : Tests {
     my $e = Blog::Entry->create(
-        uri => 'http://test/',
+        uri   => 'http://test/',
         title => 'こんにちは',
-        body => '世界',
+        body  => '世界',
     );
     ok ($e, 'entry');
     my $t_u = $e->title_as_utf8;

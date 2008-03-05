@@ -1,5 +1,20 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.16
+	- Added string grep feature into MoCo::List->grep
+	- Changed cache style not to cache additional columns
+	- Changed retrieve_multi using OR clauses
+	- Fixed session_cache problem
+	- Added prefetch feature
+	- Added Cache::Dummy for session cache
+	- Changed default cache object to Cache::FastMmap
+	- Added auto require feature for relations using UNIVERSAL::require
+
+0.15 Fri Nov 2 2007
+     	- Changed has_many keys cache using cache instead of icache
+	- Changed find method to receive array arguments
+	- Changed search not to use MoCo's search
+
 0.14 Fri Jul 27 2007
 	- Added restore_from_db
 	- Added where check to update, delete

@@ -12,8 +12,10 @@ package ThisTest;
 use base qw/Test::Class/;
 use Test::More;
 use Blog::Entry;
+use DBIx::MoCo::Cache;
 
 sub regist : Test(startup) {
+    DBIx::MoCo->cache_object( DBIx::MoCo::Cache->new );
     Blog::Entry->icache_expiration(1);
     Blog::Entry->has_a(
         user => 'Blog::User',
@@ -37,14 +39,14 @@ sub has_a_cache : Tests {
     my $c1 = $cs->{retrieve_count};
     my $c2 = $cs->{retrieve_icache_count};
     ok ($u, 'e->user');
-    is ($u, $e->user, 'same instance');
+    is_deeply ($u, $e->user, 'same instance');
     is ($c1+1, $cs->{retrieve_count}, 'ret count');
     is ($c2+1, $cs->{retrieve_icache_count}, 'icache count');
-    is ($u, $e->user, 'same instance');
+    is_deeply ($u, $e->user, 'same instance');
     is ($c1+2, $cs->{retrieve_count}, 'ret count');
     is ($c2+2, $cs->{retrieve_icache_count}, 'icache count');
     sleep(2);
-    is ($u, $e->user, 'same instance');
+    is_deeply ($u, $e->user, 'same instance');
     is ($c1+3, $cs->{retrieve_count}, 'ret count');
     is ($c2+2, $cs->{retrieve_icache_count}, 'icache count');
 }
@@ -84,7 +86,7 @@ sub has_many_cache : Tests {
 sub has_many_cache2 : Tests {
     my $e = Blog::Entry->retrieve(1);
     $e->flush_icache;
-    $e->flush($e->has_many_keys_name('bookmarks'));
+    $e->flush_has_many_keys('bookmarks');
     my $cs = Blog::Entry->cache_status;
     ok ($e, 'retrieve entry');
     my $bs = $e->bookmarks(0,1);

@@ -18,6 +18,27 @@ use Blog::User;
 use Blog::Entry;
 use Blog::Bookmark;
 use Data::Dumper;
+use DBIx::MoCo::Cache;
+
+sub setup : Test(setup) {
+    DBIx::MoCo->cache_object( DBIx::MoCo::Cache->new );
+}
+
+sub cache : Test(4) {
+    Blog::User->cache_cols_only(0);
+    my $u = Blog::User->retrieve(1);
+    ok $u->isa('Blog::User');
+    $u->set(temp => 'abc');
+    $u->store_self_cache;
+    my $u2 = Blog::User->retrieve(1);
+    is ($u->{temp}, 'abc');
+    is ($u2->{temp}, 'abc');
+    Blog::User->cache_cols_only(1);
+    $u->set(temp => 'def');
+    $u->store_self_cache;
+    $u2 = Blog::User->retrieve(1);
+    is ($u2->{temp}, undef);
+}
 
 sub use_test: Tests {
     use_ok 'DBIx::MoCo';
@@ -26,6 +47,12 @@ sub use_test: Tests {
     use_ok 'Blog::User';
     use_ok 'Blog::Entry';
     use_ok 'Blog::Bookmark';
+}
+
+sub has_many_keys_cache_name : Tests {
+    my $u = Blog::User->retrieve(1);
+    ok $u;
+    is ($u->has_many_keys_cache_name('entries'), 'Blog::User-user_id-1-entries_keys');
 }
 
 sub new_test : Tests {
@@ -241,7 +268,7 @@ sub retrieve_all : Tests {
         limit => 1,
     );
     ok $b2;
-    is $b2->[0], $b1->[0];
+    is_deeply $b2->[0], $b1->[0];
     my $b3 = Blog::Bookmark->retrieve_all(
         where => {user_id => 1},
         order => 'entry_id',
@@ -249,7 +276,7 @@ sub retrieve_all : Tests {
         limit => 1,
     );
     ok $b3;
-    is $b3->[0], $b1->[1];
+    is_deeply $b3->[0], $b1->[1];
 }
 
 sub retrieve_has_many : Tests {
@@ -264,9 +291,9 @@ sub retrieve_has_many : Tests {
 sub cache_has_a : Tests {
     my $u1 = Blog::User->retrieve(1);
     my $u2 = Blog::User->retrieve(1);
-    is $u2, $u1;
+    is_deeply $u2, $u1;
     my $u3 = Blog::User->retrieve_by_name('jkondo');
-    is $u3, $u1;
+    is_deeply $u3, $u1;
 }
 
 sub cache_has_many : Tests {
@@ -315,7 +342,7 @@ sub list_methods : Tests {
 sub map_attr : Tests {
     my $user = Blog::User->retrieve(1);
     $user->entries;
-    $user->flush($user->has_many_keys_name('bookmarks'));
+    $user->flush_has_many_keys('bookmarks');
     my $bs = $user->bookmarks;
     ok $bs;
     isa_ok $bs, 'DBIx::MoCo::List';
@@ -380,16 +407,16 @@ sub has_many_cache_slice : Tests {
     is $bs3->size, 2;
     is $cs->{has_many_count}, $pre{has_many_count} + 3;
     is $cs->{has_many_cache_count}, $pre{has_many_cache_count} + 1;
-    is $bs3->[0], $bs1->[0];
-    is $bs3->[1], $bs2->[0];
+    is_deeply $bs3->[0], $bs1->[0];
+    is_deeply $bs3->[1], $bs2->[0];
     my $bs4 = $u->bookmarks(1,2);
     is $cs->{has_many_count}, $pre{has_many_count} + 4;
     is $cs->{has_many_cache_count}, $pre{has_many_cache_count} + 1;
-    is $bs4->[0], $bs3->[1];
+    is_deeply $bs4->[0], $bs3->[1];
     my $bs5 = $u->bookmarks(0,3);
     is $cs->{has_many_count}, $pre{has_many_count} + 5;
     is $cs->{has_many_cache_count}, $pre{has_many_cache_count} + 2;
-    is $bs5->[2], $bs4->[1];
+    is_deeply $bs5->[2], $bs4->[1];
 }
 
 sub param : Tests {
@@ -426,7 +453,7 @@ sub retrieve_or_create : Tests {
     is $u->name, 'one-o-one';
     my $u2 = Blog::User->retrieve_or_create(user_id => 101);
     ok $u2;
-    is $u2, $u;
+    is_deeply $u2, $u;
     is $u2->name, 'one-o-one';
 }
 

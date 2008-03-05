@@ -21,7 +21,7 @@ sub retrieve_null : Tests {
     ok ($u2, 'create u2');
     my $u3 = Blog::User->retrieve(name => $name);
     ok ($u3, 'retrieve u3');
-    is ($u3, $u2, 'u3 is u2');
+    is_deeply ($u3, $u2, 'u3 is u2');
 }
 
 1;

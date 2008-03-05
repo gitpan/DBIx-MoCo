@@ -23,6 +23,8 @@ WriteMakefile(
         Time::HiRes => 0,
         Storable => 0,
         Data::Dumper => 0,
+        Tie::IxHash => 0,
+        File::Spec => 0,
     },
     ($] >= 5.005 ?
       (ABSTRACT_FROM  => 'lib/DBIx/MoCo.pm',

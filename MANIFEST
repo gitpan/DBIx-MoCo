@@ -18,6 +18,10 @@ t/13-readonly.t
 t/14-trigger.t
 t/15-utf8.t
 t/16-instance-cache.t
+t/17-inflate_column.t
+t/18-retrieve_multi.t
+t/19-with.t
+t/20-with_default.t
 t/lib/DBIx/MoCo/Column/MyColumn.pm
 t/lib/MySQLUser.pm
 t/lib/MySQLDB.pm

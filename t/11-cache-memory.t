@@ -20,9 +20,9 @@ sub cache_memory : Tests {
     isa_ok (Blog::Class->cache_object, 'Cache::Memory');
     my $u1 = Blog::User->retrieve(1);
     my $u2 = Blog::User->retrieve(1);
-    is $u2, $u1;
+    is_deeply $u2, $u1;
     my $u3 = Blog::User->retrieve_by_name('jkondo');
-    is $u3, $u1;
+    is_deeply $u3, $u1;
 }
 
 1;

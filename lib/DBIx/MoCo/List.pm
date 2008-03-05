@@ -204,8 +204,17 @@ sub collect {
 
 sub grep {
     my ($self, $code) = @_;
-    croak "Argument must be a code" unless ref $code eq 'CODE';
-    my @grepped = CORE::grep &$code, @$self;
+    $code or return;
+    my @grepped;
+    if (!ref($code)) {
+        for (@$self) {
+            CORE::push @grepped, $_ if $_->$code;
+        }
+    } elsif (ref $code eq 'CODE') {
+        @grepped = CORE::grep &$code, @$self;
+    } else {
+        croak "Invalid code";
+    }
     wantarray ? @grepped : $self->new(\@grepped);
 }
 

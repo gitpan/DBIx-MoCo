@@ -11,6 +11,7 @@ __PACKAGE__->mk_classdata($_) for qw(username password
 __PACKAGE__->cache_connection(1);
 
 our $DEBUG = 0;
+our $SQL_COUNT = 0;
 
 # $Carp::CarpLevel = 2;
 my $sqla = SQL::Abstract->new;
@@ -124,6 +125,9 @@ sub _parse_limit {
 sub dsn {
     my $class = shift;
     my ($master_dsn, $slave_dsn);
+    if ($_[0] && ref($_[0]) eq 'HASH') {
+        @_ = (%{$_[0]});
+    }
     if ($_[1]) {
         my %args = @_;
         my $master = $args{master} or croak "master dsn is not specified";
@@ -178,6 +182,7 @@ sub execute {
     if ($DEBUG) {
         my @binds = map { defined $_ ? "'$_'" : "'NULL'" } @bind_values; 
         carp $sql . '->execute(' . join(',', @binds) . ')';
+        $SQL_COUNT++;
     }
     if (defined $data) {
         $sth->execute(@bind_values) or 

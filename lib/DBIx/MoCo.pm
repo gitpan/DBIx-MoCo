@@ -2,35 +2,66 @@ package DBIx::MoCo;
 use strict;
 use warnings;
 use base qw (Class::Data::Inheritable);
+
 use DBIx::MoCo::Relation;
 use DBIx::MoCo::List;
 use DBIx::MoCo::Cache;
+use DBIx::MoCo::Cache::Dummy;
 use DBIx::MoCo::Schema;
 use DBIx::MoCo::Column;
+
 use Carp;
 use Class::Trigger;
+use Tie::IxHash;
+use File::Spec;
 use UNIVERSAL::require;
-# use Scalar::Util qw(weaken);
 
-our $VERSION = '0.14';
+our $VERSION = '0.16';
 our $AUTOLOAD;
 
 my $cache_status = {
-    retrieve_count => 0,
-    retrieve_cache_count => 0,
+    retrieve_count        => 0,
+    retrieve_cache_count  => 0,
     retrieve_icache_count => 0,
-    retrieve_all_count => 0,
-    has_many_count => 0,
-    has_many_cache_count => 0,
+    retrieve_all_count    => 0,
+    has_many_count        => 0,
+    has_many_cache_count  => 0,
     has_many_icache_count => 0,
-    retrieved_oids => [],
+    retrieved_oids        => [],
 };
 my ($db,$session,$schema);
 
 __PACKAGE__->mk_classdata($_) for 
     qw(cache_object default_cache_expiration icache_expiration
-       cache_null_object db_object table);
-__PACKAGE__->cache_object(DBIx::MoCo::Cache->new);
+       cache_null_object table cache_cols_only _db_object save_explicitly);
+
+## NOTE: INIT block does not work well under mod_perl or POE.
+## Please set cache_object() explicitly if you want to use transparent caching.
+# INIT {
+#     unless (defined __PACKAGE__->cache_object) {
+#         if (Cache::FastMmap->require) {
+#             my $file = File::Spec->catfile('/tmp', __PACKAGE__);
+
+#             File::Spec->require or die $@;
+#             __PACKAGE__->cache_object(
+#                 Cache::FastMmap->new(
+#                     share_file     => $file,
+#                     unlink_on_exit => 1,
+#                     expire_time    => 600, # sec
+#                 ) or die $!
+#             );
+
+#             chmod(0666, $file) or die $! if -e $file;
+#         } else {
+#             warn "Using DBIx::MoCo::Cache is now deprecated because of memory leak."
+#                 . "Install Cache::FastMmap instead, or setup cache_object explicitly.";
+
+#             DBIx::MoCo::Cache->require or die $@;
+#             __PACKAGE__->cache_object( DBIx::MoCo::Cache->new );
+#         }
+#     }
+# }
+
 __PACKAGE__->default_cache_expiration(60 * 60 * 3); # 3 hours
 __PACKAGE__->icache_expiration(0); # Instance cache
 __PACKAGE__->cache_null_object(1);
@@ -64,19 +95,41 @@ sub cache_status { $cache_status }
 sub cache {
     my $class = shift;
     $class = ref($class) if ref($class);
+
+    ## It is no matter costs of creating Dummy objects because it is a singleton.
+    my $cache = $class->cache_object || DBIx::MoCo::Cache::Dummy->instance;
+
     my ($k,$v,$ex) = @_;
-    my $cache = $class->cache_object;
     # warn "$cache in $class";
     my $s = $class->is_in_session;
     if (defined $v) {
         $ex ||= $class->default_cache_expiration;
         $ex = "+$ex" if ($ex && ref($cache) eq 'Cache::Memory');
-        $cache->set($k,$v,$ex);
+        if ($v eq '' && $cache->can('remove')) {
+            $cache->remove($k);
+        } else {
+            if ($class->cache_cols_only && ref($v) &&
+                    ref($v) =~ /::/ && $v->isa($class)) {
+                # remove additional elements
+                my @cols = @{$v->columns};
+                for (qw(changed_cols to_be_updated object_id)) {
+                    push @cols, $_ if (defined $v->{$_});
+                }
+                my $hash = {map {$_ => $v->{$_}} @cols};
+                my $o = bless $hash, $class;
+                $cache->set($k,$o,$ex);
+                $s->{cache}->{$k} = $o if $s;
+            } else {
+                $cache->set($k,$v,$ex);
+                $s->{cache}->{$k} = $v if $s;
+            }
+        }
         # warn $cache . '->set(' . $k . ')';
-        $s->{cache}->{$k} = $v if $s;
+        return $v;
+    } elsif ($k) {
+        # warn "hit session cache for $k" if ($s && $s->{cache}->{$k});
+        return $s->{cache}->{$k} || $cache->get($k);
     }
-    # warn "hit session cache for $k" if ($s && $s->{cache}->{$k});
-    return $s->{cache}->{$k} || $cache->get($k);
 }
 
 sub flush_belongs_to {} # it's delivered from MoCo::Relation
@@ -88,10 +141,13 @@ sub flush_self_cache {
         $class = ref $self;
     }
     $self or confess '$self is not specified';
+
+    return unless $class->cache_object;
+
     my $rm = $class->cache_object->can('remove') ? 'remove' : 'delete';
     for (@{$self->object_ids}) {
         # warn "flush $_";
-        # weaken($class->cache($_));
+        #weaken($class->cache($_));
         $class->cache_object->$rm($_);
     }
 }
@@ -136,23 +192,19 @@ sub flush_icache {
     }
 }
 
-sub has_many_max_offset_name {
-    my $class = shift;
+sub has_many_keys_cache_name {
+    my $self = shift;
     my $attr = shift or return;
-    return sprintf('_%s_max_offset', $attr);
-}
-
-sub has_many_keys_name {
-    my $class = shift;
-    my $attr = shift or return;
-    return sprintf('_%s_keys', $attr);
+    my $oid = $self->object_id or return;
+    return sprintf('%s-%s_keys', $oid, $attr);
 }
 
 sub flush_has_many_keys {
     my $self = shift;
     my $attr = shift or return;
-    $self->flush($self->has_many_keys_name($attr));
-    $self->flush($self->has_many_max_offset_name($attr));
+    # $self->flush($self->has_many_keys_name($attr));
+    # $self->flush($self->has_many_max_offset_name($attr));
+    $self->cache($self->has_many_keys_cache_name($attr), '');
 }
 
 # session controllers
@@ -181,11 +233,23 @@ sub end_session {
 sub save_changed {
     my $class = shift;
     $class->is_in_session or return;
-    $_->save for @{$class->session->{changed_objects}};
+    for (@{$class->session->{changed_objects}}) {
+        $_ or next;
+        $_->save;
+    }
 }
 
 # CLASS DEFINISION METHODS
 sub relation { 'DBIx::MoCo::Relation' }
+
+sub db_object {
+    my $class = shift;
+    if (my $db = shift) {
+        $class->_db_object($db);
+    }
+    $class->_db_object;
+}
+
 sub has_a {
     my $class = shift;
     $class->relation->register($class, 'has_a', @_);
@@ -204,15 +268,23 @@ sub schema {
     return $schema->{$class};
 }
 
-sub primary_keys { $_[0]->schema->primary_keys }
+for my $attr (qw/primary_keys unique_keys retrieve_keys columns/) {
+    my $classdata = "_" . $attr;
+    __PACKAGE__->mk_classdata($classdata);
 
-sub retrieve_keys {
-    my $class = shift;
-    $class->schema->retrieve_keys(@_);
+    no strict 'refs';
+    *{__PACKAGE__ . "\::$attr"} = sub {
+        my $class = shift;
+        if (@_) {
+            my @keys = (ref $_[0] and ref $_[0] eq 'ARRAY') ? @{$_[0]} : @_;
+            $class->$classdata(\@keys);
+        } else {
+            $class->$classdata
+                ? $class->$classdata
+                : $class->schema->$attr;
+        }
+    };
 }
-
-sub unique_keys { $_[0]->schema->unique_keys }
-sub columns { $_[0]->schema->columns }
 
 sub has_muid {
     my $class = shift;
@@ -245,11 +317,12 @@ sub object_id {
     my $self = shift;
     my $class = ref($self) || $self;
     $self = undef unless ref($self);
-    my $prefix = $class->object_id_prefix || '';
-    my ($key, $col);
     if ($self && $self->{object_id}) {
         return $self->{object_id};
-    } elsif ($self && @{$class->retrieve_keys || $class->primary_keys}) {
+    }
+    my $prefix = $class->object_id_prefix || '';
+    my ($key, $col);
+    if ($self && @{$class->retrieve_keys || $class->primary_keys}) {
         if ($self->has_muid) {
             $key = $self->muid;
         } else {
@@ -274,6 +347,7 @@ sub object_id {
             $key = $prefix . '-' . $col . '-' . $value;
         }
     }
+    $self->{object_id} = $key if $self;;
     return $key;
 }
 
@@ -333,28 +407,83 @@ sub restore_from_db {
 sub retrieve_multi {
     my $class = shift;
     my @list = @_ or return DBIx::MoCo::List->new([]);
-    if ($class->cache_object->can('get_multi')) {
-        my $ids = [map {$class->object_id(%$_)} @list];
-        my $res = [];
-        my $cs = $cache_status;
+
+    my (@cached_objects, @non_cached_queries);
+    if ($class->cache_object && $class->cache_object->can('get_multi')) {
+        my $ids = [ map { $class->object_id(%$_) } @list ];
         my $hash = $class->cache_object->get_multi(@$ids) || {};
-        # warn join(', ', %$hash);
-        $cs->{retrieve_count} += scalar @list;
-        if (my $c = scalar keys %$hash) {
-            # warn "found $c caches in get_multi";
-            $cs->{retrieve_cache_count} += $c;
-        }
+
         for (my $i = 0; $i <= $#list; $i++) {
-            my $o = $hash->{$ids->[$i]} || $class->retrieve_by_db(%{$list[$i]}) || next;
-            $class->store_self_cache($o);
-            push @{$cs->{retrieved_oids}}, $ids->[$i] if $class->is_in_session;
-            push @$res, $o if $o;
+            my $object = $hash->{$ids->[$i]};
+            $object
+                ? push @cached_objects, $object
+                : push @non_cached_queries, $list[$i];
         }
-        # warn join(', ', @$res);
-        return DBIx::MoCo::List->new($res);
     } else {
-        return DBIx::MoCo::List->new([map{$class->retrieve(%$_)} @list]);
+        for (@list) {
+            my $cached_object = $class->cache( $class->object_id(%$_) );
+            $cached_object
+                ? push @cached_objects, $cached_object
+                : push @non_cached_queries, $_;
+        }
     }
+
+    ## Updating cache status
+    $class->cache_status->{retrieve_count} += scalar @list;
+    $class->cache_status->{retrieve_cache_count} += scalar @cached_objects;
+
+    ## All objects were found in cache.
+    if (@cached_objects == @list) {
+        my @ordered= $class->_merge_objects(\@list, @cached_objects);
+        wantarray ? return @ordered : return DBIx::MoCo::List->new(\@ordered);
+    }
+
+    my (@clauses, @bind_values);
+    for my $cond (@non_cached_queries) {
+        my $subclause = join ' AND ', map {
+            push @bind_values, $cond->{$_};
+            sprintf "%s = ?", $_
+        } keys %$cond;
+
+        push @clauses, $subclause;
+    }
+    my $where_clause = join ' OR ', map { sprintf "(%s)", $_ } @clauses;
+
+    my @objects_from_db = $class->search( where => [ $where_clause, @bind_values ] );
+
+    if ($class->is_in_session) {
+        push @{$class->cache_status->{retrieved_oids}}, map { $_->object_id } @objects_from_db;
+    }
+
+    for my $object (@objects_from_db) {
+        $class->store_self_cache($object);
+    }
+
+    my @merged = $class->_merge_objects(\@list, @cached_objects, @objects_from_db);
+    wantarray ? return @merged : return DBIx::MoCo::List->new(\@merged);
+}
+
+sub _merge_objects {
+    my $class = shift;
+    my $order = shift;
+
+    my $tied = tie my %idt, 'Tie::IxHash'; ## orderd Hash
+    $tied->Push($class->object_id( %$_ ) => undef) for @$order;
+
+    for (@_) {
+        my $id = $_->object_id;
+        die "assert" if not exists $idt{$id};
+        $tied->Push($id => $_);
+    }
+
+## cache_null_object() is now deprecated
+#     for (keys %idt) {
+#         if (not $idt{$_} and $class->cache_null_object) {
+#             $class->cache( $_ => '' );
+#         }
+#     }
+
+    grep { defined $_ } values %idt;
 }
 
 sub retrieve_or_create {
@@ -396,13 +525,17 @@ sub create {
 #         $o->changed_cols->{$_}++ for (keys %args);
 #         push @{$class->session->{changed_objects}}, $o;
 #     } else {
+    if ($class->save_explicitly) {
+        $o->set(to_be_inserted => 1);
+        $o->changed_cols->{$_}++ for keys %args;
+    } else {
         $class->db->insert($class->table,\%args) or croak 'couldnt create';
         my $pk = $class->primary_keys->[0];
         unless (defined $args{$pk}) {
             my $id = $class->db->last_insert_id;
             $o->set($pk => $id);
         }
-#     }
+    }
     $class->call_trigger('after_create', $o);
     return $o;
 }
@@ -444,26 +577,77 @@ sub delete_all {
 sub search {
     my $class = shift;
     my %args = @_;
+
+    my $with = delete $args{with};
+
     $args{table} = $class->table;
     my $res = $class->db->search(%args);
-    $_ = $class->new(%$_) for (@$res);
-    wantarray ? @$res :
-        DBIx::MoCo::List->new($res);
+    $_ = $class->new(%$_) for @$res;
+    $class->merge_with($res, $with) if $with;
+
+    wantarray ? @$res : DBIx::MoCo::List->new($res);
+}
+
+sub merge_with {
+    my ($class, $res, $with, $without) = @_;
+
+    my @with_attrs = (ref $with and ref $with eq 'ARRAY') ? @$with : $with;
+
+    if ($without) {
+        my @withouts = (ref $without and ref $without eq 'ARRAY') ? @$without : $without;
+        my $regex = sprintf '(?:^%s$)', join '|', @withouts;
+        @with_attrs = grep { $_ !~ m/$regex/ } @with_attrs;
+    }
+
+    for my $with_attr (@with_attrs) {
+        my $rel = $class->relation->find_relation_by_attr($class => $with_attr)
+            or croak "No such relation for attr '$with_attr' in $class";
+
+        my $key = $rel->{option}->{key} or next;
+
+        my ($my_key, $other_key);
+        (ref $key and ref $key eq 'HASH')
+            ? ($my_key, $other_key) = %$key
+            : $my_key = $other_key  = $key;
+
+        my @queries = map { +{ $other_key => $_->$my_key } } @$res;
+
+        ## Only creating caches for less SQL queries.
+        ## Those caches will be stored to the session cache if the session is activated.
+        $rel->{class}->retrieve_multi(@queries);
+    }
+
+    $res;
 }
 
 sub count {
     my $class = shift;
-    my $where = shift;
-    $class->db->search(
+    my $where = '';
+    if ($_[1]) {
+        my %args = @_;
+        $where = \%args;
+    } elsif ($_[0]) {
+        $where = shift;
+    }
+    my $res = $class->db->search(
         table => $class->table,
         field => 'COUNT(*) as count',
-        where => $where || '',
-    )->[0]->{count};
+        where => $where,
+    );
+    return $res->[0]->{count} || 0;
 }
 
 sub find {
     my $class = shift;
-    my $where = shift or return;
+    my $where;
+    if ($_[1]) {
+        my %args = @_;
+        $where = \%args;
+    } elsif ($_[0]) {
+        $where = shift;
+    } else {
+        return;
+    }
     $class->search(
         where => $where,
         offset => 0,
@@ -493,9 +677,41 @@ sub AUTOLOAD {
     } elsif (defined $self->{$method} || $class->has_column($method)) {
         *$AUTOLOAD = sub { shift->param($method, @_) };
     } else {
-        croak "undefined method $method";
+        croak sprintf 'Can\'t locate object method "%s" via package %s', $method, $class;
     }
     goto &$AUTOLOAD;
+}
+
+sub inflate_column {
+    my $class = shift;
+    @_ % 2 and croak "You gave me an odd number of parameters to inflate_column()";
+
+    my %args = @_;
+    while (my ($col, $as) = each %args) {
+        no strict 'refs';
+        if (ref $as and ref $as eq 'HASH') {
+            for (qw/inflate deflate/) {
+                if ($as->{$_} and ref $as->{$_} ne 'CODE') {
+                    croak sprintf "parameter '%s' takes only CODE reference", $_
+                }
+            }
+
+            *{"$class\::$col"} = sub {
+                my $self = shift;
+                if (@_) {
+                    $as->{deflate}
+                        ? $self->param( $col => $as->{deflate}->(@_) )
+                        : $self->param( $col => @_ );
+                } else {
+                    $as->{inflate}
+                        ? $as->{inflate}->( $self->param($col) )
+                        : $self->param( $col );
+                }
+            }
+        } else {
+            *{"$class\::$col"} = $class->_column_as_handler($col, $as);
+        }
+    }
 }
 
 {
@@ -595,6 +811,7 @@ sub new {
     my $self = \%args;
     $self->{changed_cols} = {};
     bless $self, $class;
+    $self;
 }
 
 sub flush {
@@ -608,6 +825,7 @@ sub flush {
 sub param {
     my $self = shift;
     my $class = ref $self or return;
+    return unless(defined $_[0]);
     # if (defined $_[1]) {
     if (@_ > 1) {
         @_ % 2 and croak "You gave me an odd number of parameters to param()!";
@@ -618,6 +836,9 @@ sub param {
             $self->{to_be_updated}++;
             $self->{changed_cols}->{$_}++ for (keys %args);
             push @{$class->session->{changed_objects}}, $self;
+        } elsif ($class->save_explicitly) {
+            $self->{to_be_updated}++;
+            $self->{changed_cols}->{$_}++ for keys %args;
         } else {
             my $where = $self->primary_keys_hash or return;
             %$where or return;
@@ -635,8 +856,8 @@ sub primary_keys_hash {
     @{$class->primary_keys} or return;
     my $hash = {};
     for (@{$class->primary_keys}) {
+        defined $self->{$_} or return;
         $hash->{$_} = $self->{$_};
-        defined $hash->{$_} or return;
     }
     return $hash;
 }

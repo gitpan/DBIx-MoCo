@@ -11,7 +11,6 @@ ThisTest->runtests;
 package ThisTest;
 use base qw/Test::Class/;
 use Test::More;
-use DBIx::MoCo::Cache;
 use Blog::User;
 use Blog::Bookmark;
 use MySQLDB;
@@ -53,14 +52,19 @@ sub param : Tests {
     is $schema->param('validation'), $validation;
 }
 
-sub mysql : Test(7) {
+sub mysql : Test(9) {
     MySQLDB->dbh or return('skipped mysql tests');
     my $pk = MySQLUser->primary_keys;
     ok $pk;
-    is_deeply $pk, ['Host', 'User'], 'mysql user pri keys';
+
+    is @$pk, 2, 'number of column in mysql user pri keys';
+    is( grep({ m/(Host|User)/ } @$pk), 2, 'mysql user pri keys' );
+
     my $uk = MySQLUser->unique_keys;
     ok $uk;
-    is_deeply $uk, ['Host', 'User'], 'mysql user uniq keys';
+    is @$uk, 2, 'number of column in mysql user uniq keys';
+    is( grep({ m/(Host|User)/ } @$uk), 2, 'mysql user uniq keys' );
+
     my $cols = MySQLUser->columns;
     ok $cols;
     isa_ok $cols, 'ARRAY';

@@ -42,9 +42,10 @@ sub retrieve_keys {
 
 sub utf8_columns {
     my $self = shift;
-    if (my $cols = $_[0]) {
-        ref $cols eq 'ARRAY' or croak 'utf8_columns must be an array ref';
+    if (@_) {
+        my $cols = (ref $_[0] and ref $_[0] eq 'ARRAY') ? $_[0] : [ @_ ];
         $self->{utf8_columns} = $cols;
+
         my $class = $self->{class};
         no strict 'refs';
         for my $col (@$cols) {

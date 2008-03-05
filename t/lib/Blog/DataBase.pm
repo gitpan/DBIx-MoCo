@@ -5,7 +5,7 @@ use base qw(DBIx::MoCo::DataBase);
 
 my $DB;
 use File::Temp qw/tempfile/;
-(undef, $DB) = tempfile();
+(undef, $DB) = tempfile( UNLINK => 1 );
 
 __PACKAGE__->dsn("dbi:SQLite:dbname=$DB");
 

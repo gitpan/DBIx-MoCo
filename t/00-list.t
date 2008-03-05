@@ -12,6 +12,7 @@ package ThisTest;
 use base qw/Test::Class/;
 use Test::More;
 use DBIx::MoCo::List;
+use Blog::User;
 
 sub use_test : Tests {
     use_ok 'DBIx::MoCo::List';
@@ -37,6 +38,16 @@ sub index_of : Tests {
     is ($list->index_of(3), 3, 'index of 3');
     ok (!$list->index_of(4), 'index of 4');
     is ($list->index_of(sub { shift == 2 }), 2, 'index of sub(2)');
+}
+
+sub grep : Tests {
+    my $list = DBIx::MoCo::List->new([
+        Blog::User->new(name => 0),
+        Blog::User->new(name => 1),
+        Blog::User->new(name => ''),
+        Blog::User->new(name => 'jkondo'),
+    ])->grep('name');
+    is ($list->size, 2);
 }
 
 1;
