@@ -180,4 +180,22 @@ sub cache : Tests {
     Blog::Entry->cache_object($cache_orig);
 }
 
+sub pk_is_zero : Tests {
+    my $entry = Blog::Entry->create(
+        entry_id => 0,
+        user_id  => 1,
+        uri      => 'http://b.hatena.ne.jp/',
+        title    => 'zero primary',
+        body     => '',
+    );
+
+    my $entries = Blog::Entry->retrieve_multi(
+        { entry_id => 0 },
+        { entry_id => 1 }
+    );
+    is $entries->size, 2;
+
+    $entry->delete;
+}
+
 __END__

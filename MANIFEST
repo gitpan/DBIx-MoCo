@@ -22,6 +22,8 @@ t/17-inflate_column.t
 t/18-retrieve_multi.t
 t/19-with.t
 t/20-with_default.t
+t/21-cache_dummy.t
+t/22-list_class.t
 t/lib/DBIx/MoCo/Column/MyColumn.pm
 t/lib/MySQLUser.pm
 t/lib/MySQLDB.pm
@@ -42,6 +44,7 @@ lib/DBIx/MoCo/MUID.pm
 lib/DBIx/MoCo/Readonly.pm
 lib/DBIx/MoCo/Relation.pm
 lib/DBIx/MoCo/Schema.pm
+lib/DBIx/MoCo/Cache/Dummy.pm
 lib/DBIx/MoCo/Column/DateTime.pm
 lib/DBIx/MoCo/Column/URI.pm
 lib/DBIx/MoCo/Column/UTCDateTime.pm

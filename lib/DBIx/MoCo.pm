@@ -16,7 +16,7 @@ use Tie::IxHash;
 use File::Spec;
 use UNIVERSAL::require;
 
-our $VERSION = '0.16';
+our $VERSION = '0.17';
 our $AUTOLOAD;
 
 my $cache_status = {
@@ -33,7 +33,7 @@ my ($db,$session,$schema);
 
 __PACKAGE__->mk_classdata($_) for 
     qw(cache_object default_cache_expiration icache_expiration
-       cache_null_object table cache_cols_only _db_object save_explicitly);
+       cache_null_object table cache_cols_only _db_object save_explicitly list_class);
 
 ## NOTE: INIT block does not work well under mod_perl or POE.
 ## Please set cache_object() explicitly if you want to use transparent caching.
@@ -339,8 +339,8 @@ sub object_id {
         $key = $prefix . $key;
     } elsif (@{$class->primary_keys} == 1) {
         my @args = @_;
-        $col = $args[1] ? $args[0] : $class->primary_keys->[0];
-        my $value = $args[1] ? $args[1] : $args[0];
+        $col = defined $args[1] ? $args[0] : $class->primary_keys->[0];
+        my $value = defined $args[1] ? $args[1] : $args[0];
         if ($col eq 'muid') {
             $key = $value;
         } else {
@@ -406,7 +406,7 @@ sub restore_from_db {
 
 sub retrieve_multi {
     my $class = shift;
-    my @list = @_ or return DBIx::MoCo::List->new([]);
+    my @list = @_ or return $class->_list([]);
 
     my (@cached_objects, @non_cached_queries);
     if ($class->cache_object && $class->cache_object->can('get_multi')) {
@@ -435,7 +435,7 @@ sub retrieve_multi {
     ## All objects were found in cache.
     if (@cached_objects == @list) {
         my @ordered= $class->_merge_objects(\@list, @cached_objects);
-        wantarray ? return @ordered : return DBIx::MoCo::List->new(\@ordered);
+        wantarray ? return @ordered : return $class->_list(\@ordered);
     }
 
     my (@clauses, @bind_values);
@@ -460,7 +460,7 @@ sub retrieve_multi {
     }
 
     my @merged = $class->_merge_objects(\@list, @cached_objects, @objects_from_db);
-    wantarray ? return @merged : return DBIx::MoCo::List->new(\@merged);
+    wantarray ? return @merged : return $class->_list(\@merged);
 }
 
 sub _merge_objects {
@@ -503,7 +503,7 @@ sub retrieve_all {
     my $list = $class->retrieve_all_id_hash(%args);
     push @$result, $class->retrieve(%$_) for (@$list);
     wantarray ? @$result :
-        DBIx::MoCo::List->new($result);
+        $class->_list($result);
 }
 
 sub retrieve_all_id_hash {
@@ -585,7 +585,7 @@ sub search {
     $_ = $class->new(%$_) for @$res;
     $class->merge_with($res, $with) if $with;
 
-    wantarray ? @$res : DBIx::MoCo::List->new($res);
+    wantarray ? @$res : $class->_list($res);
 }
 
 sub merge_with {
@@ -798,6 +798,20 @@ sub _retrieve_by_or_create_handler {
         @args{@keys} = @_;
         return $self->retrieve(%args) || $class->create(%args);
     };
+}
+
+sub _list {
+    my $class = shift;
+
+    if ($class->list_class) {
+        $class->list_class->require;
+        if ($@ and $@ !~ m/^Can\'t locate .+? in \@INC/) {
+            die $@;
+        }
+        return $class->list_class->new(@_);
+    } else {
+        return DBIx::MoCo::List->new(@_);
+    }
 }
 
 sub DESTROY {

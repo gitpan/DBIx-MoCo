@@ -1,6 +1,10 @@
 Revision history for Perl extension DBIx::MoCo.
 
-0.16
+0.17 Fri Mar 7 2008
+	- Fixed zero primary key problem in _merge_objects
+	- Added list_class method to use 
+
+0.16 Wed Mar 5 2008
 	- Added string grep feature into MoCo::List->grep
 	- Changed cache style not to cache additional columns
 	- Changed retrieve_multi using OR clauses
