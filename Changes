@@ -1,8 +1,17 @@
 Revision history for Perl extension DBIx::MoCo.
 
+0.18 Sun Jun 8 2008
+	- Added DBIx::MoCo::Fixture by naoya
+	- Added session_cache method for obtaining session cache hash ref.
+	- Fixed a bug in flush_has_many_keys (deleting session cache)
+	- Added info to sql error messages (by naoya)
+	- Fixed DateTime problem with null columns (by naoya)
+	- Added scalar method to force scalar context from TT etc. (by naoya)
+	- Updated documents. (by kentaro)
+
 0.17 Fri Mar 7 2008
 	- Fixed zero primary key problem in _merge_objects
-	- Added list_class method to use 
+	- Added list_class
 
 0.16 Wed Mar 5 2008
 	- Added string grep feature into MoCo::List->grep

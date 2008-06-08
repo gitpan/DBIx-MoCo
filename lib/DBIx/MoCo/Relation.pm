@@ -143,7 +143,7 @@ sub register_has_many {
             if ($icache) {
                 # warn "set icache and return";
                 $icache->{$icache_key} = $model->retrieve_multi(@{$keys->{array}});
-                $res = $icache->{$icache_key}->slice($off, $last) || return;
+                $res = $icache->{$icache_key}->slice($off, $last);
             } else {
                 $res = $model->retrieve_multi(@{$keys->{array}}[$off || 0 .. $last]);
             }

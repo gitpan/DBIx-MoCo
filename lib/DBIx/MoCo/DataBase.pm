@@ -184,16 +184,29 @@ sub execute {
         carp $sql . '->execute(' . join(',', @binds) . ')';
         $SQL_COUNT++;
     }
-    if (defined $data) {
-        $sth->execute(@bind_values) or 
-            carp sprintf('SQL Error: "%s" (%s)', $sql, $sth->errstr) and return;
-        $$data = $sth->fetchall_arrayref({});
-    } else {
-        unless ($sth->execute(@bind_values)) {
-            carp qq/SQL Error "$sql"/;
-            return;
+
+    my $sql_error = sub {
+        my ($sql, $sth) = @_;
+        defined $data
+            ? sprintf('SQL Error: "%s" (%s)', $sql, $sth->errstr)
+            : sprintf('SQL Error "%s"', $sql);
+    };
+
+    eval {
+        if (defined $data) {
+            $sth->execute(@bind_values) or carp $sql_error->($sth, $sql) and return;
+            $$data = $sth->fetchall_arrayref({});
+        } else {
+            unless ($sth->execute(@bind_values)) {
+                $sql_error->($sql, $sth);
+                return;
+            }
         }
+    };
+    if ($@) {
+        confess $sql_error->($sql, $sth);
     }
+
     if ($sql =~ /^insert/io) {
         $class->last_insert_id($dbh->last_insert_id(undef,undef,undef,undef) ||
                            $dbh->{'mysql_insertid'});

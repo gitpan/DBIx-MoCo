@@ -24,6 +24,7 @@ t/19-with.t
 t/20-with_default.t
 t/21-cache_dummy.t
 t/22-list_class.t
+t/23-fixture.t
 t/lib/DBIx/MoCo/Column/MyColumn.pm
 t/lib/MySQLUser.pm
 t/lib/MySQLDB.pm
@@ -34,10 +35,13 @@ t/lib/Blog/DataBase.pm
 t/lib/Blog/Entry.pm
 t/lib/Blog/ReadonlyUser.pm
 t/lib/Blog/User.pm
+t/fixtures/user.yml
+t/fixtures/entry.yml
 lib/DBIx/MoCo.pm
 lib/DBIx/MoCo/Cache.pm
 lib/DBIx/MoCo/Column.pm
 lib/DBIx/MoCo/DataBase.pm
+lib/DBIx/MoCo/Fixture.pm
 lib/DBIx/MoCo/Join.pm
 lib/DBIx/MoCo/List.pm
 lib/DBIx/MoCo/MUID.pm

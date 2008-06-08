@@ -6,6 +6,7 @@ use DateTime::Format::MySQL;
 
 sub DateTime {
     my $self = shift;
+    return if not $$self;
     return if $$self =~ /0000/o;
     my $dt = DateTime::Format::MySQL->parse_datetime($$self);
     return $dt;

@@ -20,6 +20,21 @@ use Blog::Bookmark;
 use Data::Dumper;
 use DBIx::MoCo::Cache;
 
+sub flush_has_many_keys : Tests {
+    DBIx::MoCo->start_session;
+    my $u = Blog::User->retrieve(1);
+    my $entries = $u->entries;
+    Blog::Entry->create(
+        user_id => $u->user_id,
+        uri => 'test',
+        title => 'test',
+        body => 'test',
+    );
+    my $entries2 = $u->entries;
+    is ($entries2->size, $entries->size + 1);
+    DBIx::MoCo->end_session;
+}
+
 sub setup : Test(setup) {
     DBIx::MoCo->cache_object( DBIx::MoCo::Cache->new );
 }

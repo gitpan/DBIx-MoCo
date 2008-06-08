@@ -71,6 +71,10 @@ sub utc_datetime : Tests {
     $e->created_as_UTCDateTime($dt2);
     is ($e->created, '2007-03-05 12:34:56', 'created');
     $e->created_as_UTCDateTime($dt);
+
+    $e = Blog::Entry->create(uri => 'http://www.example.com/');
+    is ($e->created, undef, 'undefined column');
+    is ($e->created_as_UTCDateTime, undef, 'inflates undefined column');
 }
 
 sub datetime : Tests {
@@ -91,6 +95,10 @@ sub datetime : Tests {
     $e->created_as_DateTime($dt2);
     is ($e->created, '2007-03-05 12:34:56', 'created');
     $e->created_as_DateTime($dt);
+
+    $e = Blog::Entry->create(uri => 'http://www.example.com/');
+    is ($e->created, undef, 'undefined column');
+    is ($e->created_as_DateTime, undef, 'inflates undefined column');
 }
 
 sub my_column : Tests {
